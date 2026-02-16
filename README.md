@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/banner.svg" alt="claude-scouter banner" width="100%"/>
+  <img src="./assets/banner.png" alt="claude-scouter banner" width="100%"/>
 </p>
 
 <p align="center">
