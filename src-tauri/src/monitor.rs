@@ -6,8 +6,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
+
+static WARNED_70: AtomicBool = AtomicBool::new(false);
+static WARNED_90: AtomicBool = AtomicBool::new(false);
 
 // Plan limits (tokens per 5-hour window)
 const PLAN_PRO: u64 = 44_000;
@@ -306,11 +311,60 @@ fn scan_usage(data: &mut UsageData) {
     data.last_updated = Utc::now().to_rfc3339();
 }
 
+fn check_and_notify(handle: &AppHandle, data: &UsageData) {
+    let pct = data.usage_percent;
+
+    if pct >= 90.0 && !WARNED_90.load(Ordering::Relaxed) {
+        WARNED_90.store(true, Ordering::Relaxed);
+        let _ = handle
+            .notification()
+            .builder()
+            .title("⚠️ Claude Scouter — Critical")
+            .body(format!(
+                "Token usage at {:.1}%! ({} / {})",
+                pct,
+                format_tokens_rust(data.total_tokens),
+                format_tokens_rust(data.limit)
+            ))
+            .show();
+    } else if pct >= 70.0 && !WARNED_70.load(Ordering::Relaxed) {
+        WARNED_70.store(true, Ordering::Relaxed);
+        let _ = handle
+            .notification()
+            .builder()
+            .title("🔶 Claude Scouter — Warning")
+            .body(format!(
+                "Token usage at {:.1}%. Consider slowing down.",
+                pct
+            ))
+            .show();
+    }
+
+    // Reset warnings when usage drops (new window)
+    if pct < 70.0 {
+        WARNED_70.store(false, Ordering::Relaxed);
+        WARNED_90.store(false, Ordering::Relaxed);
+    } else if pct < 90.0 {
+        WARNED_90.store(false, Ordering::Relaxed);
+    }
+}
+
+fn format_tokens_rust(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
 pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
     // Initial scan
     {
         let mut d = data.lock().unwrap();
         scan_usage(&mut d);
+        check_and_notify(&handle, &d);
         let _ = handle.emit("usage-updated", d.clone());
     }
 
@@ -361,6 +415,7 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
                 if last_scan.elapsed() >= debounce {
                     let mut d = data.lock().unwrap();
                     scan_usage(&mut d);
+                    check_and_notify(&handle, &d);
                     let _ = handle.emit("usage-updated", d.clone());
                     last_scan = Instant::now();
                 }
@@ -368,6 +423,7 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let mut d = data.lock().unwrap();
                 scan_usage(&mut d);
+                check_and_notify(&handle, &d);
                 let _ = handle.emit("usage-updated", d.clone());
                 last_scan = Instant::now();
             }

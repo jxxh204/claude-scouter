@@ -68,12 +68,20 @@ body {
   padding: 10px 14px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  cursor: grab;
   border-radius: 12px 12px 0 0;
+  -webkit-app-region: drag;
+  cursor: grab;
 }
 
 .titlebar:active {
   cursor: grabbing;
+}
+
+/* Interactive elements inside titlebar must not be draggable */
+.titlebar select,
+.titlebar button,
+.titlebar input {
+  -webkit-app-region: no-drag;
 }
 
 .titlebar-left {

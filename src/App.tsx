@@ -1,7 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface UsageData {
   plan: string;
@@ -32,7 +31,6 @@ interface SessionInfo {
 }
 
 const PLANS = ["pro", "max5", "max20"];
-const appWindow = getCurrentWindow();
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -106,14 +104,6 @@ export default function App() {
     setData(result);
   };
 
-  const onMouseDown = useCallback(async (e: React.MouseEvent) => {
-    // Don't drag if clicking on interactive elements
-    const target = e.target as HTMLElement;
-    if (target.closest("button, select, input, a")) return;
-    e.preventDefault();
-    await appWindow.startDragging();
-  }, []);
-
   if (!data) {
     return (
       <div className="app loading">
@@ -126,7 +116,7 @@ export default function App() {
   return (
     <div className="app">
       {/* Custom titlebar — mousedown triggers drag */}
-      <div className="titlebar" onMouseDown={onMouseDown}>
+      <div className="titlebar">
         <div className="titlebar-left">
           <StatusDot status={data.status} />
           <span className="title">Claude Scouter</span>
