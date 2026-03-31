@@ -32,6 +32,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(usage_data)
         .invoke_handler(tauri::generate_handler![get_usage, set_plan])
         .setup(move |app| {
@@ -47,6 +48,7 @@ fn main() {
 
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .tooltip("Claude Scouter")
                 .on_menu_event(move |app, event| match event.id().as_ref() {
