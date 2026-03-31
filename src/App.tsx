@@ -97,10 +97,10 @@ function MiniChart({ data, labelKey, valueKey }: { data: { [k: string]: any }[];
 
 // Countdown component that ticks every second
 function Countdown({ minutes }: { minutes: number }) {
-  const [remaining, setRemaining] = useState(minutes * 60);
+  const [remaining, setRemaining] = useState(Math.round(minutes * 60));
 
   useEffect(() => {
-    setRemaining(minutes * 60);
+    setRemaining(Math.round(minutes * 60));
   }, [minutes]);
 
   useEffect(() => {
