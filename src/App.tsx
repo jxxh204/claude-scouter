@@ -236,6 +236,13 @@ export default function App() {
   const [showCustomLimit, setShowCustomLimit] = useState(false);
   const [customLimitInput, setCustomLimitInput] = useState("");
   const [showCharPreview, setShowCharPreview] = useState(false);
+  const [miniMode, setMiniMode] = useState(false);
+
+  const toggleMiniMode = async () => {
+    const next = !miniMode;
+    await invoke("set_mini_mode", { mini: next });
+    setMiniMode(next);
+  };
 
   useEffect(() => {
     invoke<UsageData>("get_usage").then(setData);
@@ -277,6 +284,26 @@ export default function App() {
     );
   }
 
+  if (miniMode) {
+    const statusColor = data.status === "critical" ? "#ef4444" : data.status === "warning" ? "#f59e0b" : "#8b5cf6";
+    return (
+      <div className="app mini" onMouseDown={handleDrag}>
+        <div className="mini-bar">
+          <StatusDot status={data.status} />
+          <div className="mini-progress">
+            <div className="mini-progress-fill" style={{ width: `${Math.min(100, data.usagePercent)}%`, background: statusColor }} />
+          </div>
+          <span className="mini-percent">{data.usagePercent.toFixed(0)}%</span>
+          <span className="mini-tokens">{formatTokens(data.totalTokens)}</span>
+          {data.estimatedRemainingMin > 0 && data.burnRate > 0 && (
+            <span className="mini-time">⏱{formatTime(data.estimatedRemainingMin)}</span>
+          )}
+          <button className="mini-expand" onClick={toggleMiniMode} title="Expand">⬆</button>
+        </div>
+      </div>
+    );
+  }
+
   if (showCharPreview) {
     return (
       <div className="app">
@@ -299,6 +326,7 @@ export default function App() {
           <span className="title">Claude Scouter</span>
         </div>
         <div className="titlebar-right">
+          <button className="icon-btn" onClick={toggleMiniMode} title="Focus Mode">🔽</button>
           <button className="icon-btn" onClick={() => setShowCharPreview(true)} title="Character Preview">🎨</button>
           <select value={data.plan} onChange={(e) => handlePlanChange(e.target.value)} className="plan-select">
             {PLANS.map((p) => <option key={p} value={p}>{p.toUpperCase()}</option>)}

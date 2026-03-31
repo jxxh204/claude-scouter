@@ -47,6 +47,18 @@ fn set_project_filter(project: Option<String>, state: tauri::State<'_, Arc<Mutex
     data.clone()
 }
 
+#[tauri::command]
+fn set_mini_mode(mini: bool, window: tauri::WebviewWindow) -> Result<(), String> {
+    if mini {
+        let _ = window.set_size(tauri::LogicalSize::new(280.0, 52.0));
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(200.0, 48.0)));
+    } else {
+        let _ = window.set_size(tauri::LogicalSize::new(360.0, 620.0));
+        let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 400.0)));
+    }
+    Ok(())
+}
+
 fn main() {
     let usage_data = Arc::new(Mutex::new(UsageData::default()));
     let usage_for_watcher = usage_data.clone();
@@ -60,7 +72,8 @@ fn main() {
             get_usage,
             set_plan,
             set_custom_limit,
-            set_project_filter
+            set_project_filter,
+            set_mini_mode
         ])
         .setup(move |app| {
             // Hide from Dock — tray-only mode
