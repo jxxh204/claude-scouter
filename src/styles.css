@@ -461,6 +461,142 @@ body {
   font-size: 10px;
 }
 
+/* Countdown */
+.countdown {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown.warning {
+  color: var(--yellow);
+}
+
+.countdown.critical {
+  color: var(--red);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Chart section */
+.chart-section {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.chart-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+/* Models */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-item {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.model-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.model-cost {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.model-bar-container {
+  height: 4px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.model-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+/* History */
+.history-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.history-date {
+  font-weight: 600;
+  width: 50px;
+}
+
+.history-tokens {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.history-cost {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-msgs {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

@@ -63,6 +63,12 @@ fn main() {
             set_project_filter
         ])
         .setup(move |app| {
+            // Hide from Dock — tray-only mode
+            #[cfg(target_os = "macos")]
+            {
+                app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             let handle = app.handle().clone();
 
             let show = MenuItemBuilder::with_id("show", "Show Scouter").build(app)?;

@@ -40,6 +40,8 @@ pub struct UsageData {
     pub sessions: Vec<SessionInfo>,
     pub projects: Vec<ProjectInfo>,
     pub hourly_usage: Vec<HourlyPoint>,
+    pub models: Vec<ModelUsage>,
+    pub daily_history: Vec<DailyPoint>,
     pub active_project: Option<String>,
     pub last_updated: String,
     pub status: String,
@@ -68,8 +70,28 @@ pub struct ProjectInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HourlyPoint {
-    pub hour: String,       // e.g., "14:00"
+    pub hour: String,
     pub tokens: u64,
+    pub messages: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    pub cost: f64,
+    pub messages: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyPoint {
+    pub date: String, // "2026-03-31"
+    pub tokens: u64,
+    pub cost: f64,
     pub messages: u64,
 }
 
@@ -94,6 +116,8 @@ impl Default for UsageData {
             sessions: vec![],
             projects: vec![],
             hourly_usage: vec![],
+            models: vec![],
+            daily_history: vec![],
             active_project: None,
             last_updated: Utc::now().to_rfc3339(),
             status: "ok".into(),
@@ -133,17 +157,34 @@ impl UsageData {
     }
 }
 
-const INPUT_PRICE: f64 = 3.0;
-const OUTPUT_PRICE: f64 = 15.0;
+// Model-specific pricing per million tokens
+fn model_pricing(model: &str) -> (f64, f64) {
+    // (input_per_m, output_per_m)
+    let m = model.to_lowercase();
+    if m.contains("opus") {
+        (15.0, 75.0)
+    } else if m.contains("haiku") {
+        (0.25, 1.25)
+    } else {
+        // Default: Sonnet pricing
+        (3.0, 15.0)
+    }
+}
+
 const CACHE_READ_PRICE: f64 = 0.30;
 const CACHE_CREATION_PRICE: f64 = 3.75;
 
-fn calculate_cost(input: u64, output: u64, cache_read: u64, cache_creation: u64) -> f64 {
-    (input as f64 * INPUT_PRICE
-        + output as f64 * OUTPUT_PRICE
+fn calculate_cost_for_model(model: &str, input: u64, output: u64, cache_read: u64, cache_creation: u64) -> f64 {
+    let (inp, outp) = model_pricing(model);
+    (input as f64 * inp
+        + output as f64 * outp
         + cache_read as f64 * CACHE_READ_PRICE
         + cache_creation as f64 * CACHE_CREATION_PRICE)
         / 1_000_000.0
+}
+
+fn calculate_cost(input: u64, output: u64, cache_read: u64, cache_creation: u64) -> f64 {
+    calculate_cost_for_model("sonnet", input, output, cache_read, cache_creation)
 }
 
 fn get_claude_dir() -> Option<PathBuf> {
@@ -151,15 +192,12 @@ fn get_claude_dir() -> Option<PathBuf> {
 }
 
 fn extract_project_name(path: &PathBuf) -> String {
-    // ~/.claude/projects/<hash>/<project-name>.jsonl or nested
     let path_str = path.to_string_lossy();
-    // Try to get meaningful name from path
     if let Some(projects_idx) = path_str.find("/projects/") {
         let after = &path_str[projects_idx + 10..];
-        // Remove file extension and hash prefixes
         let parts: Vec<&str> = after.split('/').collect();
         if parts.len() >= 2 {
-            return parts[0..parts.len()-1].join("/");
+            return parts[0..parts.len() - 1].join("/");
         }
     }
     path.file_stem()
@@ -178,6 +216,7 @@ struct LogEntry {
     cost_usd: Option<f64>,
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    model: Option<String>,
     usage: Option<TokenUsage>,
 }
 
@@ -185,6 +224,7 @@ struct LogEntry {
 #[allow(dead_code)]
 struct LogMessage {
     role: Option<String>,
+    model: Option<String>,
     usage: Option<TokenUsage>,
 }
 
@@ -196,18 +236,22 @@ struct TokenUsage {
     cache_creation_input_tokens: Option<u64>,
 }
 
+struct ModelAccum {
+    input_tokens: u64,
+    output_tokens: u64,
+    messages: u64,
+}
+
 fn scan_usage(data: &mut UsageData) {
     let claude_dir = match get_claude_dir() {
         Some(d) => d,
         None => return,
     };
 
-    // Preserve settings
     let plan = data.plan.clone();
     let custom_limit = data.custom_limit;
     let active_project = data.active_project.clone();
 
-    // Reset counters
     data.input_tokens = 0;
     data.output_tokens = 0;
     data.cache_read_tokens = 0;
@@ -217,16 +261,21 @@ fn scan_usage(data: &mut UsageData) {
     data.sessions.clear();
     data.projects.clear();
     data.hourly_usage.clear();
+    data.models.clear();
+    data.daily_history.clear();
     data.plan = plan;
     data.custom_limit = custom_limit;
     data.active_project = active_project;
 
     let now = Utc::now();
     let window_start = now - Duration::hours(WINDOW_HOURS);
+    let history_start = now - Duration::days(7); // 7-day history
 
     let mut session_map: HashMap<String, SessionInfo> = HashMap::new();
     let mut project_map: HashMap<String, ProjectInfo> = HashMap::new();
-    let mut hourly_map: HashMap<String, (u64, u64)> = HashMap::new(); // hour -> (tokens, msgs)
+    let mut hourly_map: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut model_map: HashMap<String, ModelAccum> = HashMap::new();
+    let mut daily_map: HashMap<String, (u64, f64, u64)> = HashMap::new(); // date -> (tokens, cost, msgs)
     let mut first_timestamp: Option<DateTime<Utc>> = None;
 
     let pattern = claude_dir.join("projects").join("**").join("*.jsonl");
@@ -240,33 +289,27 @@ fn scan_usage(data: &mut UsageData) {
     for path in paths {
         let project_name = extract_project_name(&path);
 
-        // Skip files not modified in the last 6 hours (perf optimization)
+        // Skip files not modified recently (perf)
         if let Ok(meta) = fs::metadata(&path) {
             if let Ok(modified) = meta.modified() {
                 let age = modified.elapsed().unwrap_or_default();
-                if age > std::time::Duration::from_secs(6 * 3600) {
-                    // Still register project name
+                if age > std::time::Duration::from_secs(8 * 24 * 3600) {
                     project_map.entry(project_name.clone()).or_insert(ProjectInfo {
                         name: project_name.clone(),
                         path: path.to_string_lossy().to_string(),
-                        tokens: 0,
-                        messages: 0,
-                        cost: 0.0,
+                        tokens: 0, messages: 0, cost: 0.0,
                     });
                     continue;
                 }
             }
         }
 
-        // If filtering by project, skip non-matching files
         if let Some(ref active) = data.active_project {
             if !active.is_empty() && project_name != *active {
                 project_map.entry(project_name.clone()).or_insert(ProjectInfo {
                     name: project_name.clone(),
                     path: path.to_string_lossy().to_string(),
-                    tokens: 0,
-                    messages: 0,
-                    cost: 0.0,
+                    tokens: 0, messages: 0, cost: 0.0,
                 });
                 continue;
             }
@@ -277,13 +320,10 @@ fn scan_usage(data: &mut UsageData) {
             Err(_) => continue,
         };
 
-        // Ensure project exists in map even if no entries in window
         project_map.entry(project_name.clone()).or_insert(ProjectInfo {
             name: project_name.clone(),
             path: path.to_string_lossy().to_string(),
-            tokens: 0,
-            messages: 0,
-            cost: 0.0,
+            tokens: 0, messages: 0, cost: 0.0,
         });
 
         for line in content.lines() {
@@ -297,15 +337,10 @@ fn scan_usage(data: &mut UsageData) {
                 .as_ref()
                 .and_then(|ts| ts.parse::<DateTime<Utc>>().ok());
 
-            if let Some(dt) = entry_time {
-                if dt < window_start {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-
-            let dt = entry_time.unwrap();
+            let dt = match entry_time {
+                Some(dt) if dt >= history_start => dt,
+                _ => continue,
+            };
 
             let usage = entry
                 .usage
@@ -317,46 +352,66 @@ fn scan_usage(data: &mut UsageData) {
                 let output = u.output_tokens.unwrap_or(0);
                 let cache_read = u.cache_read_input_tokens.unwrap_or(0);
                 let cache_create = u.cache_creation_input_tokens.unwrap_or(0);
-
-                data.input_tokens += input;
-                data.output_tokens += output;
-                data.cache_read_tokens += cache_read;
-                data.cache_creation_tokens += cache_create;
-                data.message_count += 1;
-
                 let tokens = input + output;
 
-                if first_timestamp.is_none() || dt < first_timestamp.unwrap() {
-                    first_timestamp = Some(dt);
-                }
+                // Model tracking
+                let model_name = entry.model
+                    .as_deref()
+                    .or(entry.message.as_ref().and_then(|m| m.model.as_deref()))
+                    .unwrap_or("unknown")
+                    .to_string();
 
-                // Hourly buckets
-                let hour_key = format!("{:02}:00", dt.format("%H"));
-                let hourly = hourly_map.entry(hour_key).or_insert((0, 0));
-                hourly.0 += tokens;
-                hourly.1 += 1;
-
-                // Track session
-                let sid = entry.session_id.clone().unwrap_or_else(|| "unknown".into());
-                let session = session_map.entry(sid.clone()).or_insert(SessionInfo {
-                    id: sid,
-                    tokens: 0,
-                    cost: 0.0,
-                    messages: 0,
-                    started: entry.timestamp.clone().unwrap_or_default(),
+                let model_accum = model_map.entry(model_name.clone()).or_insert(ModelAccum {
+                    input_tokens: 0, output_tokens: 0, messages: 0,
                 });
-                session.tokens += tokens;
-                session.messages += 1;
 
-                // Track project
-                if let Some(proj) = project_map.get_mut(&project_name) {
-                    proj.tokens += tokens;
-                    proj.messages += 1;
+                // Daily history (7 days)
+                let date_key = dt.format("%Y-%m-%d").to_string();
+                let daily = daily_map.entry(date_key).or_insert((0, 0.0, 0));
+                daily.0 += tokens;
+                daily.1 += calculate_cost_for_model(&model_name, input, output, cache_read, cache_create);
+                daily.2 += 1;
+
+                // Only count within 5-hour window for current stats
+                if dt >= window_start {
+                    data.input_tokens += input;
+                    data.output_tokens += output;
+                    data.cache_read_tokens += cache_read;
+                    data.cache_creation_tokens += cache_create;
+                    data.message_count += 1;
+
+                    model_accum.input_tokens += input;
+                    model_accum.output_tokens += output;
+                    model_accum.messages += 1;
+
+                    if first_timestamp.is_none() || dt < first_timestamp.unwrap() {
+                        first_timestamp = Some(dt);
+                    }
+
+                    let hour_key = format!("{:02}:00", dt.format("%H"));
+                    let hourly = hourly_map.entry(hour_key).or_insert((0, 0));
+                    hourly.0 += tokens;
+                    hourly.1 += 1;
+
+                    let sid = entry.session_id.clone().unwrap_or_else(|| "unknown".into());
+                    let session = session_map.entry(sid.clone()).or_insert(SessionInfo {
+                        id: sid, tokens: 0, cost: 0.0, messages: 0,
+                        started: entry.timestamp.clone().unwrap_or_default(),
+                    });
+                    session.tokens += tokens;
+                    session.messages += 1;
+
+                    if let Some(proj) = project_map.get_mut(&project_name) {
+                        proj.tokens += tokens;
+                        proj.messages += 1;
+                    }
                 }
             }
 
             if let Some(cost) = entry.cost_usd {
-                data.total_cost += cost;
+                if dt >= window_start {
+                    data.total_cost += cost;
+                }
             }
         }
     }
@@ -364,20 +419,39 @@ fn scan_usage(data: &mut UsageData) {
     // Calculate costs
     if data.total_cost == 0.0 {
         data.total_cost = calculate_cost(
-            data.input_tokens,
-            data.output_tokens,
-            data.cache_read_tokens,
-            data.cache_creation_tokens,
+            data.input_tokens, data.output_tokens,
+            data.cache_read_tokens, data.cache_creation_tokens,
         );
     }
 
     for session in session_map.values_mut() {
         session.cost = calculate_cost(session.tokens / 2, session.tokens / 2, 0, 0);
     }
-
     for proj in project_map.values_mut() {
         proj.cost = calculate_cost(proj.tokens / 2, proj.tokens / 2, 0, 0);
     }
+
+    // Model usage
+    data.models = model_map.into_iter().map(|(name, acc)| {
+        let cost = calculate_cost_for_model(&name, acc.input_tokens, acc.output_tokens, 0, 0);
+        ModelUsage {
+            model: name,
+            input_tokens: acc.input_tokens,
+            output_tokens: acc.output_tokens,
+            total_tokens: acc.input_tokens + acc.output_tokens,
+            cost,
+            messages: acc.messages,
+        }
+    }).collect();
+    data.models.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+
+    // Daily history
+    let mut dates: Vec<String> = daily_map.keys().cloned().collect();
+    dates.sort();
+    data.daily_history = dates.into_iter().map(|d| {
+        let (tokens, cost, messages) = daily_map[&d];
+        DailyPoint { date: d, tokens, cost, messages }
+    }).collect();
 
     // Burn rate
     data.recalculate();
@@ -388,18 +462,11 @@ fn scan_usage(data: &mut UsageData) {
         }
     }
 
-    let remaining_tokens = if data.total_tokens < data.limit {
-        data.limit - data.total_tokens
-    } else {
-        0
-    };
+    let remaining_tokens = if data.total_tokens < data.limit { data.limit - data.total_tokens } else { 0 };
     data.estimated_remaining_min = if data.burn_rate > 0.0 {
         remaining_tokens as f64 / data.burn_rate
-    } else {
-        0.0
-    };
+    } else { 0.0 };
 
-    // Window reset countdown
     if let Some(first) = first_timestamp {
         let window_end = first + Duration::hours(WINDOW_HOURS);
         let remaining = (window_end - now).num_seconds() as f64 / 60.0;
@@ -410,27 +477,17 @@ fn scan_usage(data: &mut UsageData) {
         data.session_start = Some(first.to_rfc3339());
     }
 
-    // Sort and collect
     data.sessions = session_map.into_values().collect();
     data.sessions.sort_by(|a, b| b.tokens.cmp(&a.tokens));
-
     data.projects = project_map.into_values().collect();
     data.projects.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
-    // Build sorted hourly data
     let mut hours: Vec<String> = hourly_map.keys().cloned().collect();
     hours.sort();
-    data.hourly_usage = hours
-        .into_iter()
-        .map(|h| {
-            let (tokens, messages) = hourly_map[&h];
-            HourlyPoint {
-                hour: h,
-                tokens,
-                messages,
-            }
-        })
-        .collect();
+    data.hourly_usage = hours.into_iter().map(|h| {
+        let (tokens, messages) = hourly_map[&h];
+        HourlyPoint { hour: h, tokens, messages }
+    }).collect();
 
     data.update_limit();
     data.last_updated = Utc::now().to_rfc3339();
@@ -438,33 +495,20 @@ fn scan_usage(data: &mut UsageData) {
 
 fn check_and_notify(handle: &AppHandle, data: &UsageData) {
     let pct = data.usage_percent;
-
     if pct >= 90.0 && !WARNED_90.load(Ordering::Relaxed) {
         WARNED_90.store(true, Ordering::Relaxed);
-        let _ = handle
-            .notification()
-            .builder()
+        let _ = handle.notification().builder()
             .title("🚨 Claude Scouter — Critical")
-            .body(format!(
-                "Token usage at {:.1}%! ({} / {})",
-                pct,
-                format_tokens_rust(data.total_tokens),
-                format_tokens_rust(data.limit)
-            ))
+            .body(format!("Token usage at {:.1}%! ({} / {})", pct,
+                format_tokens_rust(data.total_tokens), format_tokens_rust(data.limit)))
             .show();
     } else if pct >= 70.0 && !WARNED_70.load(Ordering::Relaxed) {
         WARNED_70.store(true, Ordering::Relaxed);
-        let _ = handle
-            .notification()
-            .builder()
+        let _ = handle.notification().builder()
             .title("⚠️ Claude Scouter — Warning")
-            .body(format!(
-                "Token usage at {:.1}%. Consider slowing down.",
-                pct
-            ))
+            .body(format!("Token usage at {:.1}%. Consider slowing down.", pct))
             .show();
     }
-
     if pct < 70.0 {
         WARNED_70.store(false, Ordering::Relaxed);
         WARNED_90.store(false, Ordering::Relaxed);
@@ -474,13 +518,9 @@ fn check_and_notify(handle: &AppHandle, data: &UsageData) {
 }
 
 fn format_tokens_rust(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
+    if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1_000_000.0) }
+    else if n >= 1_000 { format!("{:.1}K", n as f64 / 1_000.0) }
+    else { n.to_string() }
 }
 
 pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
@@ -493,20 +533,14 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
 
     let claude_dir = match get_claude_dir() {
         Some(d) => d,
-        None => {
-            eprintln!("Could not find ~/.claude directory");
-            return;
-        }
+        None => { eprintln!("Could not find ~/.claude directory"); return; }
     };
 
     let (tx, rx) = mpsc::channel();
-
     let mut watcher = match recommended_watcher(move |res: Result<Event, notify::Error>| {
         if let Ok(event) = res {
             match event.kind {
-                EventKind::Modify(_) | EventKind::Create(_) => {
-                    let _ = tx.send(());
-                }
+                EventKind::Modify(_) | EventKind::Create(_) => { let _ = tx.send(()); }
                 _ => {}
             }
         }
