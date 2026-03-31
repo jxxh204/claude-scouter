@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicehash/tauri/dev/packages/tauri-utils/schema.json",
+  "productName": "Claude Code Monitor",
+  "version": "0.1.0",
+  "identifier": "com.claudecode.monitor",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Claude Code Monitor",
+        "width": 360,
+        "height": 520,
+        "resizable": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "minWidth": 300,
+        "minHeight": 400
+      }
+    ],
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {}
+}
