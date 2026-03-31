@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
@@ -14,7 +14,6 @@ use tauri_plugin_notification::NotificationExt;
 static WARNED_70: AtomicBool = AtomicBool::new(false);
 static WARNED_90: AtomicBool = AtomicBool::new(false);
 
-// Plan limits (tokens per 5-hour window)
 const PLAN_PRO: u64 = 44_000;
 const PLAN_MAX5: u64 = 88_000;
 const PLAN_MAX20: u64 = 220_000;
@@ -25,6 +24,7 @@ const WINDOW_HOURS: i64 = 5;
 pub struct UsageData {
     pub plan: String,
     pub limit: u64,
+    pub custom_limit: Option<u64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -36,8 +36,11 @@ pub struct UsageData {
     pub burn_rate: f64,
     pub estimated_remaining_min: f64,
     pub usage_percent: f64,
-    pub window_remaining_min: f64, // minutes until window resets
+    pub window_remaining_min: f64,
     pub sessions: Vec<SessionInfo>,
+    pub projects: Vec<ProjectInfo>,
+    pub hourly_usage: Vec<HourlyPoint>,
+    pub active_project: Option<String>,
     pub last_updated: String,
     pub status: String,
 }
@@ -52,11 +55,30 @@ pub struct SessionInfo {
     pub started: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfo {
+    pub name: String,
+    pub path: String,
+    pub tokens: u64,
+    pub messages: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HourlyPoint {
+    pub hour: String,       // e.g., "14:00"
+    pub tokens: u64,
+    pub messages: u64,
+}
+
 impl Default for UsageData {
     fn default() -> Self {
         Self {
             plan: "max5".into(),
             limit: PLAN_MAX5,
+            custom_limit: None,
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,
@@ -70,6 +92,9 @@ impl Default for UsageData {
             usage_percent: 0.0,
             window_remaining_min: 0.0,
             sessions: vec![],
+            projects: vec![],
+            hourly_usage: vec![],
+            active_project: None,
             last_updated: Utc::now().to_rfc3339(),
             status: "ok".into(),
         }
@@ -78,11 +103,15 @@ impl Default for UsageData {
 
 impl UsageData {
     pub fn update_limit(&mut self) {
-        self.limit = match self.plan.as_str() {
-            "pro" => PLAN_PRO,
-            "max5" => PLAN_MAX5,
-            "max20" => PLAN_MAX20,
-            _ => PLAN_MAX5,
+        self.limit = if let Some(custom) = self.custom_limit {
+            custom
+        } else {
+            match self.plan.as_str() {
+                "pro" => PLAN_PRO,
+                "max5" => PLAN_MAX5,
+                "max20" => PLAN_MAX20,
+                _ => PLAN_MAX5,
+            }
         };
         self.recalculate();
     }
@@ -104,7 +133,6 @@ impl UsageData {
     }
 }
 
-// Pricing per million tokens (Claude Sonnet 4 pricing)
 const INPUT_PRICE: f64 = 3.0;
 const OUTPUT_PRICE: f64 = 15.0;
 const CACHE_READ_PRICE: f64 = 0.30;
@@ -120,6 +148,23 @@ fn calculate_cost(input: u64, output: u64, cache_read: u64, cache_creation: u64)
 
 fn get_claude_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude"))
+}
+
+fn extract_project_name(path: &PathBuf) -> String {
+    // ~/.claude/projects/<hash>/<project-name>.jsonl or nested
+    let path_str = path.to_string_lossy();
+    // Try to get meaningful name from path
+    if let Some(projects_idx) = path_str.find("/projects/") {
+        let after = &path_str[projects_idx + 10..];
+        // Remove file extension and hash prefixes
+        let parts: Vec<&str> = after.split('/').collect();
+        if parts.len() >= 2 {
+            return parts[0..parts.len()-1].join("/");
+        }
+    }
+    path.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".into())
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +202,11 @@ fn scan_usage(data: &mut UsageData) {
         None => return,
     };
 
+    // Preserve settings
+    let plan = data.plan.clone();
+    let custom_limit = data.custom_limit;
+    let active_project = data.active_project.clone();
+
     // Reset counters
     data.input_tokens = 0;
     data.output_tokens = 0;
@@ -165,14 +215,20 @@ fn scan_usage(data: &mut UsageData) {
     data.total_cost = 0.0;
     data.message_count = 0;
     data.sessions.clear();
+    data.projects.clear();
+    data.hourly_usage.clear();
+    data.plan = plan;
+    data.custom_limit = custom_limit;
+    data.active_project = active_project;
 
     let now = Utc::now();
     let window_start = now - Duration::hours(WINDOW_HOURS);
 
     let mut session_map: HashMap<String, SessionInfo> = HashMap::new();
+    let mut project_map: HashMap<String, ProjectInfo> = HashMap::new();
+    let mut hourly_map: HashMap<String, (u64, u64)> = HashMap::new(); // hour -> (tokens, msgs)
     let mut first_timestamp: Option<DateTime<Utc>> = None;
 
-    // Scan JSONL files in ~/.claude/projects/
     let pattern = claude_dir.join("projects").join("**").join("*.jsonl");
     let pattern_str = pattern.to_string_lossy().to_string();
 
@@ -182,10 +238,36 @@ fn scan_usage(data: &mut UsageData) {
         .collect();
 
     for path in paths {
+        let project_name = extract_project_name(&path);
+
+        // If filtering by project, skip non-matching files
+        if let Some(ref active) = data.active_project {
+            if !active.is_empty() && project_name != *active {
+                // Still track project existence
+                project_map.entry(project_name.clone()).or_insert(ProjectInfo {
+                    name: project_name.clone(),
+                    path: path.to_string_lossy().to_string(),
+                    tokens: 0,
+                    messages: 0,
+                    cost: 0.0,
+                });
+                continue;
+            }
+        }
+
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
+
+        // Ensure project exists in map even if no entries in window
+        project_map.entry(project_name.clone()).or_insert(ProjectInfo {
+            name: project_name.clone(),
+            path: path.to_string_lossy().to_string(),
+            tokens: 0,
+            messages: 0,
+            cost: 0.0,
+        });
 
         for line in content.lines() {
             let entry: LogEntry = match serde_json::from_str(line) {
@@ -193,25 +275,21 @@ fn scan_usage(data: &mut UsageData) {
                 Err(_) => continue,
             };
 
-            // Parse timestamp and filter to 5-hour window
             let entry_time = entry
                 .timestamp
                 .as_ref()
                 .and_then(|ts| ts.parse::<DateTime<Utc>>().ok());
 
-            // Skip entries outside the 5-hour window
             if let Some(dt) = entry_time {
                 if dt < window_start {
                     continue;
                 }
             } else {
-                // No timestamp — skip (can't verify it's in window)
                 continue;
             }
 
             let dt = entry_time.unwrap();
 
-            // Extract usage from various structures
             let usage = entry
                 .usage
                 .as_ref()
@@ -235,11 +313,14 @@ fn scan_usage(data: &mut UsageData) {
                     first_timestamp = Some(dt);
                 }
 
+                // Hourly buckets
+                let hour_key = format!("{:02}:00", dt.format("%H"));
+                let hourly = hourly_map.entry(hour_key).or_insert((0, 0));
+                hourly.0 += tokens;
+                hourly.1 += 1;
+
                 // Track session
-                let sid = entry
-                    .session_id
-                    .clone()
-                    .unwrap_or_else(|| "unknown".into());
+                let sid = entry.session_id.clone().unwrap_or_else(|| "unknown".into());
                 let session = session_map.entry(sid.clone()).or_insert(SessionInfo {
                     id: sid,
                     tokens: 0,
@@ -249,16 +330,21 @@ fn scan_usage(data: &mut UsageData) {
                 });
                 session.tokens += tokens;
                 session.messages += 1;
+
+                // Track project
+                if let Some(proj) = project_map.get_mut(&project_name) {
+                    proj.tokens += tokens;
+                    proj.messages += 1;
+                }
             }
 
-            // Direct cost tracking
             if let Some(cost) = entry.cost_usd {
                 data.total_cost += cost;
             }
         }
     }
 
-    // If no direct cost, calculate from tokens
+    // Calculate costs
     if data.total_cost == 0.0 {
         data.total_cost = calculate_cost(
             data.input_tokens,
@@ -268,21 +354,23 @@ fn scan_usage(data: &mut UsageData) {
         );
     }
 
-    // Calculate session costs
     for session in session_map.values_mut() {
         session.cost = calculate_cost(session.tokens / 2, session.tokens / 2, 0, 0);
     }
 
-    // Calculate burn rate (tokens per minute within window)
+    for proj in project_map.values_mut() {
+        proj.cost = calculate_cost(proj.tokens / 2, proj.tokens / 2, 0, 0);
+    }
+
+    // Burn rate
+    data.recalculate();
     if let Some(first) = first_timestamp {
         let elapsed_min = (now - first).num_seconds() as f64 / 60.0;
         if elapsed_min > 0.0 {
-            data.burn_rate = (data.input_tokens + data.output_tokens) as f64 / elapsed_min;
+            data.burn_rate = data.total_tokens as f64 / elapsed_min;
         }
     }
 
-    // Estimated remaining tokens until limit
-    data.recalculate();
     let remaining_tokens = if data.total_tokens < data.limit {
         data.limit - data.total_tokens
     } else {
@@ -294,7 +382,7 @@ fn scan_usage(data: &mut UsageData) {
         0.0
     };
 
-    // Window reset countdown: time until oldest entry in window falls off
+    // Window reset countdown
     if let Some(first) = first_timestamp {
         let window_end = first + Duration::hours(WINDOW_HOURS);
         let remaining = (window_end - now).num_seconds() as f64 / 60.0;
@@ -305,9 +393,29 @@ fn scan_usage(data: &mut UsageData) {
         data.session_start = Some(first.to_rfc3339());
     }
 
+    // Sort and collect
     data.sessions = session_map.into_values().collect();
     data.sessions.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
+    data.projects = project_map.into_values().collect();
+    data.projects.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+
+    // Build sorted hourly data
+    let mut hours: Vec<String> = hourly_map.keys().cloned().collect();
+    hours.sort();
+    data.hourly_usage = hours
+        .into_iter()
+        .map(|h| {
+            let (tokens, messages) = hourly_map[&h];
+            HourlyPoint {
+                hour: h,
+                tokens,
+                messages,
+            }
+        })
+        .collect();
+
+    data.update_limit();
     data.last_updated = Utc::now().to_rfc3339();
 }
 
@@ -319,7 +427,7 @@ fn check_and_notify(handle: &AppHandle, data: &UsageData) {
         let _ = handle
             .notification()
             .builder()
-            .title("⚠️ Claude Scouter — Critical")
+            .title("🚨 Claude Scouter — Critical")
             .body(format!(
                 "Token usage at {:.1}%! ({} / {})",
                 pct,
@@ -332,7 +440,7 @@ fn check_and_notify(handle: &AppHandle, data: &UsageData) {
         let _ = handle
             .notification()
             .builder()
-            .title("🔶 Claude Scouter — Warning")
+            .title("⚠️ Claude Scouter — Warning")
             .body(format!(
                 "Token usage at {:.1}%. Consider slowing down.",
                 pct
@@ -340,7 +448,6 @@ fn check_and_notify(handle: &AppHandle, data: &UsageData) {
             .show();
     }
 
-    // Reset warnings when usage drops (new window)
     if pct < 70.0 {
         WARNED_70.store(false, Ordering::Relaxed);
         WARNED_90.store(false, Ordering::Relaxed);
@@ -360,7 +467,6 @@ fn format_tokens_rust(n: u64) -> String {
 }
 
 pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
-    // Initial scan
     {
         let mut d = data.lock().unwrap();
         scan_usage(&mut d);
@@ -395,6 +501,7 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
                 std::thread::sleep(std::time::Duration::from_secs(5));
                 let mut d = data.lock().unwrap();
                 scan_usage(&mut d);
+                check_and_notify(&handle, &d);
                 let _ = handle.emit("usage-updated", d.clone());
             }
         }

@@ -7,7 +7,7 @@
 ![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)
 
-화면 한 켠에 항상 띄워놓는 작은 위젯 형태의 Claude Code 사용량 모니터. 터미널을 열지 않아도 토큰 소비, 비용, 세션 리밋을 한눈에 확인할 수 있습니다.
+화면 한 켠에 항상 띄워놓는 작은 위젯. 터미널 없이 토큰 소비, 비용, 세션 리밋을 한눈에.
 
 > 💡 기존 CLI 버전은 [`legacy`](https://github.com/jxxh204/claude-scouter/tree/legacy) 브랜치에 보존되어 있습니다.
 
@@ -15,14 +15,32 @@
 
 ## ✨ 기능
 
-- **🔄 실시간 모니터링** — `~/.claude/` 파일 변경 감지 (notify crate), 2초 디바운스
-- **📊 토큰 사용량** — Input / Output / Cache Read / Cache Write 분리 표시
-- **💰 비용 분석** — 모델별 가격 기반 실시간 비용 계산
-- **🔥 번레이트** — 분당 토큰 소비량 + 리밋까지 남은 시간 예측
-- **⚠️ 상태 알림** — OK (< 70%) → Warning (70-90%) → Critical (90%+) 색상 변화
-- **📋 플랜 선택** — Pro (44K) / Max5 (88K) / Max20 (220K)
-- **💬 세션 추적** — 세션별 토큰 / 메시지 수 / 비용 분리 표시
-- **🖥️ 위젯 모드** — Always-on-top, 투명 배경, 커스텀 타이틀바 (드래그 이동)
+### 실시간 모니터링
+- 🔄 `~/.claude/` 파일 변경 감지 (Rust notify crate)
+- 📊 Input / Output / Cache Read / Cache Write 토큰 분리 표시
+- 💰 모델별 가격 기반 실시간 비용 계산
+- 🔥 분당 번레이트 + 리밋까지 남은 시간 예측
+- ⏰ 5시간 롤링 윈도우 필터링 + 리셋 카운트다운
+
+### 알림 & 상태
+- ⚠️ 70% 도달 시 macOS 네이티브 경고 알림
+- 🚨 90% 도달 시 Critical 알림
+- 🟢🟡🔴 상태 인디케이터 (OK / Warning / Critical)
+
+### 프로젝트 & 세션
+- 📁 프로젝트별 사용량 분리 + 필터링
+- 💬 세션별 토큰 / 메시지 / 비용 추적
+- 📈 시간별 사용량 미니 그래프
+
+### 데스크탑 위젯
+- 🖥️ macOS 메뉴바 트레이 아이콘 (클릭으로 토글)
+- 📌 Always-on-top 모드
+- 🎨 다크 테마, 투명 배경, 커스텀 타이틀바
+- 🖱️ 드래그로 위치 이동
+
+### 플랜 & 설정
+- 📋 Pro (44K) / Max5 (88K) / Max20 (220K) / Custom
+- 🎯 커스텀 토큰 리밋 직접 입력
 
 ---
 
@@ -33,7 +51,8 @@
 | **프레임워크** | Tauri v2 |
 | **프론트엔드** | React + TypeScript + Vite |
 | **백엔드** | Rust |
-| **파일 감시** | notify (inotify/FSEvents) |
+| **파일 감시** | notify (FSEvents on macOS) |
+| **알림** | tauri-plugin-notification |
 | **타겟** | macOS (Apple Silicon + Intel) |
 
 ---
@@ -59,13 +78,15 @@ npm install
 npm run tauri dev
 ```
 
-### Build
+> ⏳ 첫 빌드 시 Rust crate 컴파일로 5-10분 소요
+
+### Build (.app / .dmg)
 
 ```bash
 npm run tauri build
 ```
 
-빌드 결과물은 `src-tauri/target/release/bundle/` 에 `.dmg` / `.app` 으로 생성됩니다.
+빌드 결과물: `src-tauri/target/release/bundle/`
 
 ---
 
@@ -74,14 +95,15 @@ npm run tauri build
 ```
 claude-scouter/
 ├── src/                    # React 프론트엔드
-│   ├── App.tsx             # 메인 위젯 UI
+│   ├── App.tsx             # 메인 위젯 UI (탭: Overview/Projects/Sessions)
 │   ├── styles.css          # 다크 테마 스타일
 │   └── main.tsx            # 엔트리포인트
 ├── src-tauri/              # Rust 백엔드
 │   ├── src/
-│   │   ├── main.rs         # Tauri 앱 + commands
-│   │   └── monitor.rs      # 파일 감시 + 데이터 파싱
-│   └── tauri.conf.json     # 창 설정 (360x520, always-on-top)
+│   │   ├── main.rs         # Tauri 앱 + tray + commands
+│   │   └── monitor.rs      # 파일 감시 + 파싱 + 알림
+│   ├── icons/              # 앱 아이콘 + 트레이 템플릿
+│   └── tauri.conf.json     # 창 설정 (360x620)
 └── index.html
 ```
 
@@ -90,12 +112,13 @@ claude-scouter/
 ```
 ~/.claude/projects/**/*.jsonl
         │
-        ▼  (notify: 파일 변경 감지)
+        ▼  (notify: FSEvents)
    Rust monitor.rs
-   ├─ JSONL 파싱
-   ├─ 토큰 집계
-   ├─ 비용 계산
-   └─ 번레이트 예측
+   ├─ 5시간 윈도우 필터링
+   ├─ 토큰/비용/번레이트 계산
+   ├─ 프로젝트별/세션별 집계
+   ├─ 시간별 버킷팅
+   └─ 70%/90% 알림 트리거
         │
         ▼  (Tauri event: "usage-updated")
    React App.tsx
@@ -106,22 +129,12 @@ claude-scouter/
 
 ## 📊 지원 플랜
 
-| 플랜 | 토큰 리밋 (5시간) | 대상 |
+| 플랜 | 토큰 리밋 (5시간) | 비고 |
 |------|-------------------|------|
-| **Pro** | 44,000 | Claude Pro 구독 |
-| **Max5** | 88,000 | Claude Max (5x) |
-| **Max20** | 220,000 | Claude Max (20x) |
-
----
-
-## 🗺️ 로드맵
-
-- [ ] 시스템 트레이 / 메뉴바 앱 모드
-- [ ] macOS 네이티브 알림 (리밋 임박 시)
-- [ ] 사용량 히스토리 그래프
-- [ ] 커스텀 플랜 리밋 설정
-- [ ] 다중 프로젝트 필터링
-- [ ] 테마 커스터마이징
+| **Pro** | 44,000 | Claude Pro |
+| **Max5** | 88,000 | Claude Max 5x |
+| **Max20** | 220,000 | Claude Max 20x |
+| **Custom** | 직접 입력 | 원하는 값 설정 |
 
 ---
 

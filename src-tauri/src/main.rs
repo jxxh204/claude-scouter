@@ -21,7 +21,24 @@ fn get_usage(state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
 fn set_plan(plan: String, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
     let mut data = state.lock().unwrap();
     data.plan = plan;
+    data.custom_limit = None;
     data.update_limit();
+    data.clone()
+}
+
+#[tauri::command]
+fn set_custom_limit(limit: u64, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
+    let mut data = state.lock().unwrap();
+    data.plan = "custom".into();
+    data.custom_limit = Some(limit);
+    data.update_limit();
+    data.clone()
+}
+
+#[tauri::command]
+fn set_project_filter(project: Option<String>, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
+    let mut data = state.lock().unwrap();
+    data.active_project = project;
     data.clone()
 }
 
@@ -32,18 +49,20 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_notification::init())
         .manage(usage_data)
-        .invoke_handler(tauri::generate_handler![get_usage, set_plan])
+        .invoke_handler(tauri::generate_handler![
+            get_usage,
+            set_plan,
+            set_custom_limit,
+            set_project_filter
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
-            // Build tray menu
             let show = MenuItemBuilder::with_id("show", "Show Scouter").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app).item(&show).separator().item(&quit).build()?;
 
-            // Create tray icon
             let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png")).unwrap();
 
             let _tray = TrayIconBuilder::new()
@@ -78,7 +97,6 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Start file watcher
             let data = usage_for_watcher.clone();
             std::thread::spawn(move || {
                 monitor::watch_claude_usage(handle, data);
