@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Window } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface UsageData {
   plan: string;
@@ -32,6 +32,7 @@ interface SessionInfo {
 }
 
 const PLANS = ["pro", "max5", "max20"];
+const appWindow = getCurrentWindow();
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -105,12 +106,13 @@ export default function App() {
     setData(result);
   };
 
-  const startDrag = async () => {
-    try {
-      const win = Window.getCurrent();
-      await win.startDragging();
-    } catch (_) {}
-  };
+  const onMouseDown = useCallback(async (e: React.MouseEvent) => {
+    // Don't drag if clicking on interactive elements
+    const target = e.target as HTMLElement;
+    if (target.closest("button, select, input, a")) return;
+    e.preventDefault();
+    await appWindow.startDragging();
+  }, []);
 
   if (!data) {
     return (
@@ -123,11 +125,11 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Custom titlebar — drag anywhere on it */}
-      <div className="titlebar" data-tauri-drag-region>
-        <div className="titlebar-left" data-tauri-drag-region>
+      {/* Custom titlebar — mousedown triggers drag */}
+      <div className="titlebar" onMouseDown={onMouseDown}>
+        <div className="titlebar-left">
           <StatusDot status={data.status} />
-          <span className="title" data-tauri-drag-region>Claude Scouter</span>
+          <span className="title">Claude Scouter</span>
         </div>
         <div className="titlebar-right">
           <select
@@ -147,7 +149,7 @@ export default function App() {
       {/* Main usage */}
       <div className="section">
         <div className="usage-header">
-          <span className="usage-label">Token Usage</span>
+          <span className="usage-label">Token Usage (5h window)</span>
           <span className="usage-value">
             {formatTokens(data.totalTokens)} / {formatTokens(data.limit)}
           </span>

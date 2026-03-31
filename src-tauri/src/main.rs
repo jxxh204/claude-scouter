@@ -42,8 +42,7 @@ fn main() {
             let menu = MenuBuilder::new(app).item(&show).separator().item(&quit).build()?;
 
             // Create tray icon
-            let icon = Image::from_path("icons/icon.png")
-                .unwrap_or_else(|_| Image::from_bytes(include_bytes!("../icons/icon.png")).unwrap());
+            let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png")).unwrap();
 
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
