@@ -13,6 +13,11 @@ use tauri::{
 };
 
 #[tauri::command]
+fn start_drag(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_usage(state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
     state.lock().unwrap().clone()
 }
@@ -51,6 +56,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(usage_data)
         .invoke_handler(tauri::generate_handler![
+            start_drag,
             get_usage,
             set_plan,
             set_custom_limit,

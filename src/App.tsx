@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -163,6 +163,14 @@ export default function App() {
     setShowCustomLimit(false);
   };
 
+  const handleDrag = useCallback(async (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("button, select, input, a, .tab, .plan-select")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    await invoke("start_drag");
+  }, []);
+
   const handleProjectFilter = async (project: string | null) => {
     const result = await invoke<UsageData>("set_project_filter", {
       project: project || null,
@@ -182,7 +190,7 @@ export default function App() {
   return (
     <div className="app">
       {/* Titlebar */}
-      <div className="titlebar">
+      <div className="titlebar" onMouseDown={handleDrag}>
         <div className="titlebar-left">
           <StatusDot status={data.status} />
           <span className="title">Claude Scouter</span>

@@ -17,10 +17,8 @@
         "width": 360,
         "height": 620,
         "resizable": true,
-        "decorations": true,
-        "transparent": false,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
+        "decorations": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "minWidth": 300,
         "minHeight": 400

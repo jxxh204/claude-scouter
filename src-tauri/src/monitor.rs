@@ -240,10 +240,27 @@ fn scan_usage(data: &mut UsageData) {
     for path in paths {
         let project_name = extract_project_name(&path);
 
+        // Skip files not modified in the last 6 hours (perf optimization)
+        if let Ok(meta) = fs::metadata(&path) {
+            if let Ok(modified) = meta.modified() {
+                let age = modified.elapsed().unwrap_or_default();
+                if age > std::time::Duration::from_secs(6 * 3600) {
+                    // Still register project name
+                    project_map.entry(project_name.clone()).or_insert(ProjectInfo {
+                        name: project_name.clone(),
+                        path: path.to_string_lossy().to_string(),
+                        tokens: 0,
+                        messages: 0,
+                        cost: 0.0,
+                    });
+                    continue;
+                }
+            }
+        }
+
         // If filtering by project, skip non-matching files
         if let Some(ref active) = data.active_project {
             if !active.is_empty() && project_name != *active {
-                // Still track project existence
                 project_map.entry(project_name.clone()).or_insert(ProjectInfo {
                     name: project_name.clone(),
                     path: path.to_string_lossy().to_string(),
@@ -514,10 +531,10 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
     let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
 
     let mut last_scan = Instant::now();
-    let debounce = std::time::Duration::from_secs(2);
+    let debounce = std::time::Duration::from_secs(3);
 
     loop {
-        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
             Ok(_) => {
                 if last_scan.elapsed() >= debounce {
                     let mut d = data.lock().unwrap();
