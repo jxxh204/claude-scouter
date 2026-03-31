@@ -1,4 +1,4 @@
-# 🔬 Claude Scouter
+# 🔬 Claude Scouter (클로드 스카우터)
 
 > Claude Code 사용량을 실시간으로 모니터링하는 데스크탑 위젯 앱
 
