@@ -597,155 +597,204 @@ body {
   font-size: 10px;
 }
 
-/* Game */
-.game-view {
+/* Diablo Game */
+.diablo {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  font-family: "Georgia", "Times New Roman", serif;
 }
 
-.game-header {
-  text-align: center;
-  padding: 12px;
-  background: linear-gradient(135deg, var(--surface), var(--surface-2));
-  border-radius: 10px;
-  border: 1px solid var(--accent);
+.d-char {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #1a0a0a, #2a1515);
+  border: 1px solid #4a2020;
+  border-radius: 8px;
 }
 
-.game-class {
+.d-char-icon { font-size: 32px; }
+
+.d-char-info { flex: 1; }
+
+.d-char-class {
+  font-size: 14px;
+  font-weight: 700;
+  color: #d4a574;
+  letter-spacing: 0.5px;
+}
+
+.d-char-level {
+  font-size: 11px;
+  color: #8a7a6a;
+}
+
+.d-kills {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.d-kills-num {
   font-size: 16px;
   font-weight: 700;
-  margin-bottom: 4px;
+  color: #cc4444;
 }
 
-.game-level {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--accent);
+.d-kills-label {
+  font-size: 9px;
+  color: #8a7a6a;
+  text-transform: uppercase;
 }
 
-.game-xp {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.game-xp-bar {
-  flex: 1;
-  height: 8px;
-  background: var(--surface-2);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.game-xp-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
-  border-radius: 4px;
-  transition: width 0.5s ease;
-}
-
-.game-xp-text {
-  font-size: 10px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  min-width: 80px;
-  text-align: right;
-}
-
-.game-stats {
+/* Bars */
+.d-bars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: var(--surface);
-  border-radius: 8px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 8px 12px;
+  background: #110808;
+  border-radius: 6px;
+  border: 1px solid #2a1515;
 }
 
-.game-stat {
+.d-bar-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
-.game-stat-label {
-  font-size: 11px;
-  width: 100px;
-  white-space: nowrap;
+.d-bar-label {
+  font-size: 10px;
+  font-weight: 700;
+  width: 20px;
+  color: #8a7a6a;
 }
 
-.game-stat-bar {
+.d-bar {
   flex: 1;
-  height: 6px;
-  background: var(--surface-2);
-  border-radius: 3px;
+  height: 10px;
+  background: #1a0808;
+  border-radius: 2px;
   overflow: hidden;
+  border: 1px solid #3a1515;
 }
 
-.game-stat-fill {
+.d-bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 3px;
   transition: width 0.5s ease;
 }
 
-.game-stat-val {
-  font-size: 11px;
-  font-weight: 700;
-  width: 28px;
+.d-bar.hp .d-bar-fill { background: linear-gradient(90deg, #8b0000, #cc2222); }
+.d-bar.mp .d-bar-fill { background: linear-gradient(90deg, #00008b, #2244cc); }
+.d-bar.xp .d-bar-fill { background: linear-gradient(90deg, #6b4c00, #d4a520); }
+
+.d-bar-val {
+  font-size: 9px;
+  color: #6a5a4a;
+  min-width: 55px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-family: -apple-system, sans-serif;
 }
 
-.game-achievements {
-  background: var(--surface);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-.game-section-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-}
-
-.game-badge-grid {
+/* Stats */
+.d-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
-.game-badge {
+.d-stat {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 6px 10px;
+  background: #110808;
+  border: 1px solid #2a1515;
+  border-radius: 4px;
+}
+
+.d-stat-icon { font-size: 14px; }
+.d-stat-name { font-size: 10px; color: #8a7a6a; font-weight: 700; flex: 1; }
+.d-stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #d4a574;
+  font-variant-numeric: tabular-nums;
+  font-family: -apple-system, sans-serif;
+}
+
+/* Equipment */
+.d-equip {
+  background: #110808;
+  border: 1px solid #2a1515;
   border-radius: 6px;
-  font-size: 11px;
-  transition: all 0.2s;
+  padding: 8px;
 }
 
-.game-badge.unlocked {
-  background: var(--surface-2);
-  border: 1px solid var(--accent);
-}
-
-.game-badge.locked {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  opacity: 0.4;
-}
-
-.game-badge-icon {
-  font-size: 16px;
-}
-
-.game-badge-name {
+.d-section-title {
   font-size: 10px;
-  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #6a5a4a;
+  margin-bottom: 6px;
+  padding-left: 4px;
 }
+
+.d-equip-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-left: 2px solid #888;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.d-equip-slot {
+  width: 24px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.d-equip-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.d-equip-stat {
+  font-size: 10px;
+  color: #6a8a6a;
+  font-family: -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kill feed */
+.d-killfeed {
+  background: #110808;
+  border: 1px solid #2a1515;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.d-kill-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 11px;
+  border-bottom: 1px solid #1a0a0a;
+}
+
+.d-kill-entry:last-child { border-bottom: none; }
+.d-kill-icon { font-size: 12px; }
+.d-kill-text { flex: 1; color: #8a7a6a; }
+.d-kill-text strong { color: #cc4444; }
+.d-kill-time { font-size: 9px; color: #5a4a3a; font-family: -apple-system, sans-serif; }
 
 /* Empty state */
 .empty-state {

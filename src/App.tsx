@@ -116,8 +116,8 @@ function Countdown({ minutes }: { minutes: number }) {
   return <span>{display}</span>;
 }
 
-// Productivity Game Logic
-function calculateGameStats(data: UsageData) {
+// Diablo-style Productivity Game
+function calculateDiablo(data: UsageData) {
   const totalTokens = data.totalTokens;
   const msgs = data.messageCount;
   const outputRatio = data.outputTokens / Math.max(data.inputTokens, 1);
@@ -125,48 +125,85 @@ function calculateGameStats(data: UsageData) {
   const projectCount = data.projects.filter(p => p.tokens > 0).length;
   const modelCount = data.models.length;
 
-  // XP = total tokens / 100
-  const xp = Math.floor(totalTokens / 100);
-  const level = Math.floor(Math.sqrt(xp / 10)) + 1;
-  const xpForNext = Math.pow(level, 2) * 10;
-  const xpProgress = ((xp - Math.pow(level - 1, 2) * 10) / (xpForNext - Math.pow(level - 1, 2) * 10)) * 100;
+  // Level & XP
+  const xp = Math.floor(totalTokens / 50);
+  const level = Math.floor(Math.sqrt(xp / 5)) + 1;
+  const xpBase = Math.pow(level - 1, 2) * 5;
+  const xpNext = Math.pow(level, 2) * 5;
+  const xpProgress = ((xp - xpBase) / Math.max(1, xpNext - xpBase)) * 100;
 
-  // Stats (0-100)
-  const efficiency = Math.min(100, Math.round(outputRatio * 30)); // Higher output ratio = more efficient
-  const focus = Math.min(100, projectCount <= 1 ? 90 : Math.round(100 / projectCount)); // Fewer projects = more focus
-  const endurance = Math.min(100, Math.round((msgs / Math.max(1, data.sessions.length)) * 2)); // msgs per session
-  const wisdom = Math.min(100, Math.round(cacheHitRate * 120)); // Cache utilization
-  const versatility = Math.min(100, Math.round(modelCount * 30 + projectCount * 15)); // Using different models/projects
-  const speed = Math.min(100, Math.round(data.burnRate / 10)); // Burn rate
+  // HP & Mana
+  const maxHp = 100 + level * 20;
+  const hp = Math.max(10, maxHp - Math.floor(data.usagePercent * 1.5)); // HP drops as usage approaches limit
+  const maxMana = 50 + level * 10;
+  const mana = Math.min(maxMana, Math.floor(cacheHitRate * maxMana * 2)); // Mana from cache efficiency
 
-  // Class based on dominant stat
-  const stats = { efficiency, focus, endurance, wisdom, versatility, speed };
-  const maxStat = Object.entries(stats).sort((a, b) => b[1] - a[1])[0];
-  const titles: Record<string, string> = {
-    efficiency: "🎯 Precision Architect",
-    focus: "🧘 Zen Master",
-    endurance: "⚡ Marathon Runner",
-    wisdom: "📚 Cache Sage",
-    versatility: "🌀 Polyglot Coder",
-    speed: "🔥 Speed Daemon",
+  // Character class
+  const classes = [
+    { name: "Barbarian", icon: "⚔️", cond: data.burnRate > 300 },
+    { name: "Sorcerer", icon: "🔮", cond: modelCount >= 2 && cacheHitRate > 0.3 },
+    { name: "Rogue", icon: "🗡️", cond: outputRatio > 2.5 },
+    { name: "Druid", icon: "🌿", cond: projectCount >= 3 },
+    { name: "Necromancer", icon: "💀", cond: data.hourlyUsage.some(h => parseInt(h.hour) >= 23 || parseInt(h.hour) <= 5) },
+  ];
+  const charClass = classes.find(c => c.cond) || { name: "Wanderer", icon: "🚶" };
+
+  // Stats (Diablo-style)
+  const strength = Math.min(999, Math.floor(data.outputTokens / 1000)); // Raw output
+  const dexterity = Math.min(999, Math.floor(outputRatio * 100)); // Efficiency
+  const intelligence = Math.min(999, Math.floor(cacheHitRate * 500 + modelCount * 50)); // Smart usage
+  const vitality = Math.min(999, Math.floor(msgs * 2)); // Endurance
+
+  // Equipment (generated from usage patterns)
+  type Rarity = "common" | "magic" | "rare" | "legendary" | "unique";
+  const rarityFromValue = (v: number): Rarity => {
+    if (v > 80) return "unique";
+    if (v > 60) return "legendary";
+    if (v > 40) return "rare";
+    if (v > 20) return "magic";
+    return "common";
   };
-  const className = titles[maxStat[0]] || "🌱 Novice";
 
-  // Achievements
-  const achievements: { icon: string; name: string; unlocked: boolean }[] = [
-    { icon: "🎯", name: "First Blood", unlocked: msgs > 0 },
-    { icon: "💯", name: "Centurion", unlocked: msgs >= 100 },
-    { icon: "🏔️", name: "Token Mountain", unlocked: totalTokens >= 100000 },
-    { icon: "💰", name: "Big Spender", unlocked: data.totalCost >= 1.0 },
-    { icon: "🤖", name: "Model Mixer", unlocked: modelCount >= 2 },
-    { icon: "📁", name: "Multi-tasker", unlocked: projectCount >= 3 },
-    { icon: "⚡", name: "Cache Master", unlocked: cacheHitRate > 0.5 },
-    { icon: "🔥", name: "On Fire", unlocked: data.burnRate > 500 },
-    { icon: "🌙", name: "Night Owl", unlocked: data.hourlyUsage.some(h => parseInt(h.hour) >= 23 || parseInt(h.hour) <= 4) },
-    { icon: "📊", name: "Efficient", unlocked: outputRatio > 2 },
+  const equipment = [
+    { slot: "🪖 Helm", name: level >= 10 ? "Crown of Tokens" : level >= 5 ? "Focus Visor" : "Thinking Cap",
+      rarity: rarityFromValue(Math.min(100, level * 8)),
+      stat: `+${Math.floor(intelligence / 5)} INT` },
+    { slot: "🛡️ Shield", name: cacheHitRate > 0.5 ? "Cache Aegis" : cacheHitRate > 0.2 ? "Memory Ward" : "Basic Guard",
+      rarity: rarityFromValue(cacheHitRate * 130),
+      stat: `+${Math.floor(vitality / 3)} VIT` },
+    { slot: "⚔️ Weapon", name: data.burnRate > 500 ? "Inferno Blade" : data.burnRate > 200 ? "Swift Edge" : data.burnRate > 50 ? "Code Slicer" : "Rusty Dagger",
+      rarity: rarityFromValue(Math.min(100, data.burnRate / 5)),
+      stat: `+${Math.floor(strength / 4)} STR` },
+    { slot: "🧤 Gloves", name: outputRatio > 3 ? "Precision Gauntlets" : outputRatio > 1.5 ? "Coder's Touch" : "Worn Mitts",
+      rarity: rarityFromValue(Math.min(100, outputRatio * 25)),
+      stat: `+${Math.floor(dexterity / 4)} DEX` },
+    { slot: "👢 Boots", name: projectCount >= 4 ? "Dimensional Striders" : projectCount >= 2 ? "Project Runner" : "Leather Boots",
+      rarity: rarityFromValue(projectCount * 20),
+      stat: `+${Math.floor(projectCount * 15)} SPD` },
+    { slot: "💍 Ring", name: data.totalCost >= 10 ? "Ring of Wealth" : data.totalCost >= 1 ? "Gold Band" : "Copper Ring",
+      rarity: rarityFromValue(Math.min(100, data.totalCost * 10)),
+      stat: `$${data.totalCost.toFixed(2)} spent` },
   ];
 
-  return { level, xp, xpForNext, xpProgress, className, stats, achievements };
+  // Monsters slain (messages = kills)
+  const monstersSlain = msgs;
+  const dungeonFloor = Math.min(100, Math.floor(level / 2) + 1);
+  const bossesSlain = data.sessions.length;
+
+  // Kill feed (recent activity from hourly)
+  const recentKills = data.hourlyUsage.slice(-3).map(h => {
+    const monsterNames = ["Syntax Imp", "Bug Fiend", "Null Wraith", "Merge Demon", "Stack Golem", "Regex Beast", "Deadlock Shade"];
+    const name = monsterNames[parseInt(h.hour) % monsterNames.length];
+    const count = h.messages;
+    return { name, count, hour: h.hour };
+  });
+
+  return {
+    level, xp, xpNext, xpProgress,
+    hp, maxHp, mana, maxMana,
+    charClass, strength, dexterity, intelligence, vitality,
+    equipment, monstersSlain, dungeonFloor, bossesSlain, recentKills,
+  };
 }
 
 type Tab = "overview" | "models" | "projects" | "history" | "sessions" | "game";
@@ -367,47 +404,75 @@ export default function App() {
         )}
 
         {tab === "game" && (() => {
-          const game = calculateGameStats(data);
+          const d = calculateDiablo(data);
+          const rarityColor = (r: string) => r === "unique" ? "#c4a000" : r === "legendary" ? "#ff8000" : r === "rare" ? "#ffff00" : r === "magic" ? "#6888ff" : "#888";
           return (
-            <div className="game-view">
-              <div className="game-header">
-                <div className="game-class">{game.className}</div>
-                <div className="game-level">Level {game.level}</div>
-              </div>
-
-              <div className="game-xp">
-                <div className="game-xp-bar">
-                  <div className="game-xp-fill" style={{ width: `${Math.min(100, game.xpProgress)}%` }} />
+            <div className="diablo">
+              {/* Character header */}
+              <div className="d-char">
+                <div className="d-char-icon">{d.charClass.icon}</div>
+                <div className="d-char-info">
+                  <div className="d-char-class">{d.charClass.name}</div>
+                  <div className="d-char-level">Level {d.level} · Floor {d.dungeonFloor}</div>
                 </div>
-                <span className="game-xp-text">{game.xp} / {game.xpForNext} XP</span>
+                <div className="d-kills">
+                  <span className="d-kills-num">💀 {d.monstersSlain}</span>
+                  <span className="d-kills-label">kills</span>
+                </div>
               </div>
 
-              <div className="game-stats">
-                {Object.entries(game.stats).map(([key, val]) => (
-                  <div key={key} className="game-stat">
-                    <span className="game-stat-label">
-                      {key === "efficiency" ? "⚔️" : key === "focus" ? "🎯" : key === "endurance" ? "🛡️" : key === "wisdom" ? "📚" : key === "versatility" ? "🌀" : "⚡"}
-                      {" "}{key.charAt(0).toUpperCase() + key.slice(1)}
-                    </span>
-                    <div className="game-stat-bar">
-                      <div className="game-stat-fill" style={{ width: `${val}%` }} />
-                    </div>
-                    <span className="game-stat-val">{val}</span>
+              {/* HP / Mana / XP bars */}
+              <div className="d-bars">
+                <div className="d-bar-row">
+                  <span className="d-bar-label">HP</span>
+                  <div className="d-bar hp"><div className="d-bar-fill" style={{ width: `${(d.hp / d.maxHp) * 100}%` }} /></div>
+                  <span className="d-bar-val">{d.hp}/{d.maxHp}</span>
+                </div>
+                <div className="d-bar-row">
+                  <span className="d-bar-label">MP</span>
+                  <div className="d-bar mp"><div className="d-bar-fill" style={{ width: `${(d.mana / d.maxMana) * 100}%` }} /></div>
+                  <span className="d-bar-val">{d.mana}/{d.maxMana}</span>
+                </div>
+                <div className="d-bar-row">
+                  <span className="d-bar-label">XP</span>
+                  <div className="d-bar xp"><div className="d-bar-fill" style={{ width: `${Math.min(100, d.xpProgress)}%` }} /></div>
+                  <span className="d-bar-val">{d.xp}/{d.xpNext}</span>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="d-stats">
+                <div className="d-stat"><span className="d-stat-icon">⚔️</span><span className="d-stat-name">STR</span><span className="d-stat-val">{d.strength}</span></div>
+                <div className="d-stat"><span className="d-stat-icon">🏹</span><span className="d-stat-name">DEX</span><span className="d-stat-val">{d.dexterity}</span></div>
+                <div className="d-stat"><span className="d-stat-icon">🔮</span><span className="d-stat-name">INT</span><span className="d-stat-val">{d.intelligence}</span></div>
+                <div className="d-stat"><span className="d-stat-icon">❤️</span><span className="d-stat-name">VIT</span><span className="d-stat-val">{d.vitality}</span></div>
+              </div>
+
+              {/* Equipment */}
+              <div className="d-equip">
+                <div className="d-section-title">Equipment</div>
+                {d.equipment.map((e) => (
+                  <div key={e.slot} className="d-equip-item" style={{ borderLeftColor: rarityColor(e.rarity) }}>
+                    <span className="d-equip-slot">{e.slot}</span>
+                    <span className="d-equip-name" style={{ color: rarityColor(e.rarity) }}>{e.name}</span>
+                    <span className="d-equip-stat">{e.stat}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="game-achievements">
-                <div className="game-section-title">Achievements</div>
-                <div className="game-badge-grid">
-                  {game.achievements.map((a) => (
-                    <div key={a.name} className={`game-badge ${a.unlocked ? "unlocked" : "locked"}`} title={a.name}>
-                      <span className="game-badge-icon">{a.icon}</span>
-                      <span className="game-badge-name">{a.name}</span>
+              {/* Kill feed */}
+              {d.recentKills.length > 0 && (
+                <div className="d-killfeed">
+                  <div className="d-section-title">Recent Encounters</div>
+                  {d.recentKills.map((k, i) => (
+                    <div key={i} className="d-kill-entry">
+                      <span className="d-kill-icon">⚔️</span>
+                      <span className="d-kill-text">Slain {k.count}x <strong>{k.name}</strong></span>
+                      <span className="d-kill-time">{k.hour}</span>
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
             </div>
           );
         })()}
