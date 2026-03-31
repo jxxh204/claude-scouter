@@ -207,6 +207,27 @@ function calculateDiablo(data: UsageData) {
   };
 }
 
+function CharacterPreview({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="char-preview">
+      <div className="char-preview-title">Choose Your Scouter</div>
+      <div className="char-preview-grid">
+        <div className="char-card">
+          <img src="/char_scouter_512.png" alt="Scouter Warrior" className="char-img" />
+          <div className="char-name">Scouter Warrior</div>
+          <div className="char-desc">사이버펑크 스카우터</div>
+        </div>
+        <div className="char-card">
+          <img src="/char_diablo_512.png" alt="Dark Knight" className="char-img" />
+          <div className="char-name">Dark Knight</div>
+          <div className="char-desc">디아블로 다크 워리어</div>
+        </div>
+      </div>
+      <button className="char-back-btn" onClick={onBack}>← Back</button>
+    </div>
+  );
+}
+
 type Tab = "overview" | "models" | "projects" | "history" | "sessions" | "game";
 
 export default function App() {
@@ -214,6 +235,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [showCustomLimit, setShowCustomLimit] = useState(false);
   const [customLimitInput, setCustomLimitInput] = useState("");
+  const [showCharPreview, setShowCharPreview] = useState(false);
 
   useEffect(() => {
     invoke<UsageData>("get_usage").then(setData);
@@ -255,6 +277,20 @@ export default function App() {
     );
   }
 
+  if (showCharPreview) {
+    return (
+      <div className="app">
+        <div className="titlebar" onMouseDown={handleDrag}>
+          <div className="titlebar-left">
+            <StatusDot status={data.status} />
+            <span className="title">Claude Scouter</span>
+          </div>
+        </div>
+        <CharacterPreview onBack={() => setShowCharPreview(false)} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <div className="titlebar" onMouseDown={handleDrag}>
@@ -263,6 +299,7 @@ export default function App() {
           <span className="title">Claude Scouter</span>
         </div>
         <div className="titlebar-right">
+          <button className="icon-btn" onClick={() => setShowCharPreview(true)} title="Character Preview">🎨</button>
           <select value={data.plan} onChange={(e) => handlePlanChange(e.target.value)} className="plan-select">
             {PLANS.map((p) => <option key={p} value={p}>{p.toUpperCase()}</option>)}
           </select>
