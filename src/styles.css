@@ -597,6 +597,156 @@ body {
   font-size: 10px;
 }
 
+/* Game */
+.game-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-header {
+  text-align: center;
+  padding: 12px;
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+}
+
+.game-class {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.game-level {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.game-xp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-xp-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.game-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.game-xp-text {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 80px;
+  text-align: right;
+}
+
+.game-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.game-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-stat-label {
+  font-size: 11px;
+  width: 100px;
+  white-space: nowrap;
+}
+
+.game-stat-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.game-stat-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.game-stat-val {
+  font-size: 11px;
+  font-weight: 700;
+  width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-achievements {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.game-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.game-badge-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.game-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  transition: all 0.2s;
+}
+
+.game-badge.unlocked {
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+}
+
+.game-badge.locked {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  opacity: 0.4;
+}
+
+.game-badge-icon {
+  font-size: 16px;
+}
+
+.game-badge-name {
+  font-size: 10px;
+  font-weight: 600;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;
