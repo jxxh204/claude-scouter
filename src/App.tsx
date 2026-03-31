@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import PixelDungeon from "./PixelDungeon";
 
 interface UsageData {
   plan: string;
@@ -406,8 +407,21 @@ export default function App() {
         {tab === "game" && (() => {
           const d = calculateDiablo(data);
           const rarityColor = (r: string) => r === "unique" ? "#c4a000" : r === "legendary" ? "#ff8000" : r === "rare" ? "#ffff00" : r === "magic" ? "#6888ff" : "#888";
+          // Determine animation state
+          const animState = data.usagePercent >= 90 ? "hurt" : data.burnRate > 100 ? "attacking" : data.burnRate > 0 ? "walking" : "idle";
           return (
             <div className="diablo">
+              {/* Pixel dungeon scene */}
+              <div className="d-scene">
+                <PixelDungeon
+                  state={animState}
+                  classIcon={d.charClass.icon}
+                  floor={d.dungeonFloor}
+                  kills={d.monstersSlain}
+                  hpPercent={(d.hp / d.maxHp) * 100}
+                />
+              </div>
+
               {/* Character header */}
               <div className="d-char">
                 <div className="d-char-icon">{d.charClass.icon}</div>

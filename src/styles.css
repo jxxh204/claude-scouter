@@ -597,6 +597,21 @@ body {
   font-size: 10px;
 }
 
+/* Pixel Dungeon Canvas */
+.d-scene {
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #3a2020;
+}
+
+.pixel-dungeon-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 /* Diablo Game */
 .diablo {
   display: flex;
