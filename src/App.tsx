@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Window } from "@tauri-apps/api/window";
 
 interface UsageData {
   plan: string;
@@ -17,6 +17,7 @@ interface UsageData {
   burnRate: number;
   estimatedRemainingMin: number;
   usagePercent: number;
+  windowRemainingMin: number;
   sessions: SessionInfo[];
   lastUpdated: string;
   status: string;
@@ -39,6 +40,7 @@ function formatTokens(n: number): string {
 }
 
 function formatCost(n: number): string {
+  if (n >= 100) return "$" + n.toFixed(2);
   return "$" + n.toFixed(4);
 }
 
@@ -85,13 +87,10 @@ function ProgressBar({ percent, status }: { percent: number; status: string }) {
 
 export default function App() {
   const [data, setData] = useState<UsageData | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    // Initial fetch
     invoke<UsageData>("get_usage").then(setData);
 
-    // Listen for real-time updates
     const unlisten = listen<UsageData>("usage-updated", (event) => {
       setData(event.payload);
     });
@@ -106,10 +105,11 @@ export default function App() {
     setData(result);
   };
 
-  const handleDragStart = async (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button, select")) return;
-    const appWindow = getCurrentWindow();
-    await appWindow.startDragging();
+  const startDrag = async () => {
+    try {
+      const win = Window.getCurrent();
+      await win.startDragging();
+    } catch (_) {}
   };
 
   if (!data) {
@@ -123,11 +123,11 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Custom titlebar */}
-      <div className="titlebar" onMouseDown={handleDragStart}>
-        <div className="titlebar-left">
+      {/* Custom titlebar — drag anywhere on it */}
+      <div className="titlebar" data-tauri-drag-region>
+        <div className="titlebar-left" data-tauri-drag-region>
           <StatusDot status={data.status} />
-          <span className="title">Claude Code Monitor</span>
+          <span className="title" data-tauri-drag-region>Claude Scouter</span>
         </div>
         <div className="titlebar-right">
           <select
@@ -153,7 +153,14 @@ export default function App() {
           </span>
         </div>
         <ProgressBar percent={data.usagePercent} status={data.status} />
-        <div className="usage-percent">{data.usagePercent.toFixed(1)}%</div>
+        <div className="usage-sub">
+          <span className="usage-percent">{data.usagePercent.toFixed(1)}%</span>
+          {data.windowRemainingMin > 0 && (
+            <span className="window-reset">
+              🔄 {formatTime(data.windowRemainingMin)}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Stats grid */}
@@ -201,7 +208,7 @@ export default function App() {
         <div className="metric">
           <span className="metric-icon">⏱️</span>
           <div>
-            <span className="metric-label">Remaining</span>
+            <span className="metric-label">Until Limit</span>
             <span
               className={`metric-value ${data.status === "critical" ? "critical" : ""}`}
             >

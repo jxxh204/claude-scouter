@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicehash/tauri/dev/packages/tauri-utils/schema.json",
-  "productName": "Claude Code Monitor",
+  "productName": "Claude Scouter",
   "version": "0.1.0",
   "identifier": "com.claudecode.monitor",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Claude Code Monitor",
+        "title": "Claude Scouter",
         "width": 360,
         "height": 520,
         "resizable": true,

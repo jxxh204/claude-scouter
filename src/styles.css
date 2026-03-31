@@ -150,11 +150,21 @@ body {
   transition: width 0.5s ease, background 0.3s ease;
 }
 
+.usage-sub {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
 .usage-percent {
-  text-align: right;
   font-size: 11px;
   color: var(--text-dim);
-  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.window-reset {
+  font-size: 11px;
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 

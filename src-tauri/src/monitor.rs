@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use glob::glob;
 use notify::{recommended_watcher, Event, EventKind, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -6,13 +6,14 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 // Plan limits (tokens per 5-hour window)
 const PLAN_PRO: u64 = 44_000;
 const PLAN_MAX5: u64 = 88_000;
 const PLAN_MAX20: u64 = 220_000;
+const WINDOW_HOURS: i64 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,12 +28,13 @@ pub struct UsageData {
     pub total_cost: f64,
     pub message_count: u64,
     pub session_start: Option<String>,
-    pub burn_rate: f64,        // tokens per minute
+    pub burn_rate: f64,
     pub estimated_remaining_min: f64,
     pub usage_percent: f64,
+    pub window_remaining_min: f64, // minutes until window resets
     pub sessions: Vec<SessionInfo>,
     pub last_updated: String,
-    pub status: String, // "ok", "warning", "critical"
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +63,7 @@ impl Default for UsageData {
             burn_rate: 0.0,
             estimated_remaining_min: 0.0,
             usage_percent: 0.0,
+            window_remaining_min: 0.0,
             sessions: vec![],
             last_updated: Utc::now().to_rfc3339(),
             status: "ok".into(),
@@ -96,7 +99,7 @@ impl UsageData {
     }
 }
 
-// Pricing per million tokens (Claude 3.5/4 Sonnet pricing)
+// Pricing per million tokens (Claude Sonnet 4 pricing)
 const INPUT_PRICE: f64 = 3.0;
 const OUTPUT_PRICE: f64 = 15.0;
 const CACHE_READ_PRICE: f64 = 0.30;
@@ -158,9 +161,11 @@ fn scan_usage(data: &mut UsageData) {
     data.message_count = 0;
     data.sessions.clear();
 
+    let now = Utc::now();
+    let window_start = now - Duration::hours(WINDOW_HOURS);
+
     let mut session_map: HashMap<String, SessionInfo> = HashMap::new();
     let mut first_timestamp: Option<DateTime<Utc>> = None;
-    let mut timestamps: Vec<(DateTime<Utc>, u64)> = vec![];
 
     // Scan JSONL files in ~/.claude/projects/
     let pattern = claude_dir.join("projects").join("**").join("*.jsonl");
@@ -183,6 +188,24 @@ fn scan_usage(data: &mut UsageData) {
                 Err(_) => continue,
             };
 
+            // Parse timestamp and filter to 5-hour window
+            let entry_time = entry
+                .timestamp
+                .as_ref()
+                .and_then(|ts| ts.parse::<DateTime<Utc>>().ok());
+
+            // Skip entries outside the 5-hour window
+            if let Some(dt) = entry_time {
+                if dt < window_start {
+                    continue;
+                }
+            } else {
+                // No timestamp — skip (can't verify it's in window)
+                continue;
+            }
+
+            let dt = entry_time.unwrap();
+
             // Extract usage from various structures
             let usage = entry
                 .usage
@@ -203,14 +226,8 @@ fn scan_usage(data: &mut UsageData) {
 
                 let tokens = input + output;
 
-                // Parse timestamp for burn rate
-                if let Some(ts) = &entry.timestamp {
-                    if let Ok(dt) = ts.parse::<DateTime<Utc>>() {
-                        if first_timestamp.is_none() {
-                            first_timestamp = Some(dt);
-                        }
-                        timestamps.push((dt, tokens));
-                    }
+                if first_timestamp.is_none() || dt < first_timestamp.unwrap() {
+                    first_timestamp = Some(dt);
                 }
 
                 // Track session
@@ -223,10 +240,7 @@ fn scan_usage(data: &mut UsageData) {
                     tokens: 0,
                     cost: 0.0,
                     messages: 0,
-                    started: entry
-                        .timestamp
-                        .clone()
-                        .unwrap_or_default(),
+                    started: entry.timestamp.clone().unwrap_or_default(),
                 });
                 session.tokens += tokens;
                 session.messages += 1;
@@ -251,19 +265,19 @@ fn scan_usage(data: &mut UsageData) {
 
     // Calculate session costs
     for session in session_map.values_mut() {
-        session.cost = (session.tokens as f64 * (INPUT_PRICE + OUTPUT_PRICE) / 2.0) / 1_000_000.0;
+        session.cost = calculate_cost(session.tokens / 2, session.tokens / 2, 0, 0);
     }
 
-    // Calculate burn rate (tokens per minute over last 30 min)
+    // Calculate burn rate (tokens per minute within window)
     if let Some(first) = first_timestamp {
-        let now = Utc::now();
         let elapsed_min = (now - first).num_seconds() as f64 / 60.0;
         if elapsed_min > 0.0 {
-            data.burn_rate = data.total_tokens as f64 / elapsed_min;
+            data.burn_rate = (data.input_tokens + data.output_tokens) as f64 / elapsed_min;
         }
     }
 
-    // Estimated remaining
+    // Estimated remaining tokens until limit
+    data.recalculate();
     let remaining_tokens = if data.total_tokens < data.limit {
         data.limit - data.total_tokens
     } else {
@@ -275,6 +289,13 @@ fn scan_usage(data: &mut UsageData) {
         0.0
     };
 
+    // Window reset countdown: time until oldest entry in window falls off
+    if let Some(first) = first_timestamp {
+        let window_end = first + Duration::hours(WINDOW_HOURS);
+        let remaining = (window_end - now).num_seconds() as f64 / 60.0;
+        data.window_remaining_min = if remaining > 0.0 { remaining } else { 0.0 };
+    }
+
     if let Some(first) = first_timestamp {
         data.session_start = Some(first.to_rfc3339());
     }
@@ -282,7 +303,6 @@ fn scan_usage(data: &mut UsageData) {
     data.sessions = session_map.into_values().collect();
     data.sessions.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
-    data.recalculate();
     data.last_updated = Utc::now().to_rfc3339();
 }
 
@@ -317,9 +337,8 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("Failed to create watcher: {}", e);
-            // Fallback to polling
             loop {
-                std::thread::sleep(Duration::from_secs(5));
+                std::thread::sleep(std::time::Duration::from_secs(5));
                 let mut d = data.lock().unwrap();
                 scan_usage(&mut d);
                 let _ = handle.emit("usage-updated", d.clone());
@@ -331,16 +350,14 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
     if projects_dir.exists() {
         let _ = watcher.watch(&projects_dir, RecursiveMode::Recursive);
     }
-    // Also watch the main dir
     let _ = watcher.watch(&claude_dir, RecursiveMode::NonRecursive);
 
     let mut last_scan = Instant::now();
-    let debounce = Duration::from_secs(2);
+    let debounce = std::time::Duration::from_secs(2);
 
     loop {
-        match rx.recv_timeout(Duration::from_secs(10)) {
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
             Ok(_) => {
-                // Debounce: don't scan more than every 2s
                 if last_scan.elapsed() >= debounce {
                     let mut d = data.lock().unwrap();
                     scan_usage(&mut d);
@@ -349,7 +366,6 @@ pub fn watch_claude_usage(handle: AppHandle, data: Arc<Mutex<UsageData>>) {
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Periodic refresh
                 let mut d = data.lock().unwrap();
                 scan_usage(&mut d);
                 let _ = handle.emit("usage-updated", d.clone());
