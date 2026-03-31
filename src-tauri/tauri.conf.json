@@ -19,7 +19,7 @@
         "resizable": true,
         "decorations": true,
         "transparent": false,
-        "titleBarStyle": "overlay",
+        "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "alwaysOnTop": true,
         "minWidth": 300,
