@@ -24,12 +24,14 @@ interface UsageData {
   hourlyUsage: HourlyPoint[];
   models: ModelUsage[];
   dailyHistory: DailyPoint[];
+  recentActivities: RecentActivity[];
   activeProject: string | null;
   lastUpdated: string;
   status: string;
 }
 
-interface SessionInfo { id: string; tokens: number; cost: number; messages: number; started: string; }
+interface SessionInfo { id: string; tokens: number; cost: number; messages: number; started: string; lastActive: string; status: string; model: string; project: string; recentTools: string[]; }
+interface RecentActivity { timestamp: string; tool: string; summary: string; sessionId: string; project: string; }
 interface ProjectInfo { name: string; path: string; tokens: number; messages: number; cost: number; }
 interface HourlyPoint { hour: string; tokens: number; messages: number; }
 interface ModelUsage { model: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; messages: number; }
@@ -55,6 +57,29 @@ function formatTime(min: number): string {
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return `${h}h ${m}m`;
+}
+
+const TOOL_ICONS: Record<string, string> = {
+  Read: "📖", Edit: "✏️", Write: "📝", Bash: "💻", execute: "💻",
+  Search: "🔍", Grep: "🔍", Glob: "📂", LS: "📂", Agent: "🤖",
+};
+
+function toolIcon(name: string): string {
+  return TOOL_ICONS[name] || "🔧";
+}
+
+function relativeTime(iso: string): string {
+  if (!iso) return "";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "방금";
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+  return `${Math.floor(diff / 86400)}일 전`;
+}
+
+function SessionStatusDot({ status }: { status: string }) {
+  const colors: Record<string, string> = { active: "#22c55e", idle: "#f59e0b", offline: "#666" };
+  return <span className="status-dot" style={{ background: colors[status] || colors.offline }} />;
 }
 
 function StatusDot({ status }: { status: string }) {
@@ -228,7 +253,7 @@ function CharacterPreview({ onBack }: { onBack: () => void }) {
   );
 }
 
-type Tab = "overview" | "models" | "projects" | "history" | "sessions" | "game";
+type Tab = "overview" | "models" | "projects" | "history" | "sessions" | "activity" | "game";
 
 export default function App() {
   const [data, setData] = useState<UsageData | null>(null);
@@ -362,9 +387,9 @@ export default function App() {
       </div>
 
       <div className="tabs">
-        {(["overview", "models", "projects", "history", "sessions", "game"] as Tab[]).map((t) => (
+        {(["overview", "models", "projects", "history", "sessions", "activity", "game"] as Tab[]).map((t) => (
           <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t === "overview" ? "📊" : t === "models" ? "🤖" : t === "projects" ? "📁" : t === "history" ? "📈" : t === "sessions" ? "💬" : "🎮"}
+            {t === "overview" ? "📊" : t === "models" ? "🤖" : t === "projects" ? "📁" : t === "history" ? "📈" : t === "sessions" ? "💬" : t === "activity" ? "📋" : "🎮"}
           </button>
         ))}
       </div>
@@ -459,13 +484,50 @@ export default function App() {
         {tab === "sessions" && (
           <div className="session-list">
             {data.sessions.slice(0, 15).map((s) => (
-              <div key={s.id} className="session-item">
-                <span className="session-id">{s.id.slice(0, 8)}...</span>
-                <span className="session-tokens">{formatTokens(s.tokens)}</span>
-                <span className="session-msgs">{s.messages} msgs</span>
+              <div key={s.id} className="session-item-enhanced">
+                <div className="session-header">
+                  <SessionStatusDot status={s.status} />
+                  <span className="session-id">{s.id.slice(0, 8)}</span>
+                  {s.model && <span className="session-model-badge">{s.model}</span>}
+                  <span className="session-time">{relativeTime(s.lastActive)}</span>
+                </div>
+                {s.project && <div className="session-project">📁 {s.project.split("/").pop()}</div>}
+                <div className="session-stats">
+                  <span>{formatTokens(s.tokens)}</span>
+                  <span>{s.messages} msgs</span>
+                  <span>{formatCost(s.cost)}</span>
+                </div>
+                {s.recentTools.length > 0 && (
+                  <div className="session-tools">
+                    {s.recentTools.slice(0, 5).map((t, i) => (
+                      <span key={i} className="tool-tag">{toolIcon(t)} {t}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {data.sessions.length === 0 && <div className="empty-state">No sessions in current window</div>}
+          </div>
+        )}
+
+        {tab === "activity" && (
+          <div className="activity-feed">
+            {data.recentActivities.length === 0 && <div className="empty-state">No recent activity</div>}
+            {data.recentActivities.map((a, i) => (
+              <div key={i} className="activity-item">
+                <div className="activity-icon">{toolIcon(a.tool)}</div>
+                <div className="activity-body">
+                  <div className="activity-header">
+                    <span className="activity-tool">{a.tool}</span>
+                    {a.summary && <span className="activity-summary">{a.summary}</span>}
+                  </div>
+                  <div className="activity-meta">
+                    <span className="activity-project">📁 {a.project.split("/").pop()}</span>
+                    <span className="activity-time">{relativeTime(a.timestamp)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

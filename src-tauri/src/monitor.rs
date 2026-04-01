@@ -42,6 +42,7 @@ pub struct UsageData {
     pub hourly_usage: Vec<HourlyPoint>,
     pub models: Vec<ModelUsage>,
     pub daily_history: Vec<DailyPoint>,
+    pub recent_activities: Vec<RecentActivity>,
     pub active_project: Option<String>,
     pub last_updated: String,
     pub status: String,
@@ -55,6 +56,21 @@ pub struct SessionInfo {
     pub cost: f64,
     pub messages: u64,
     pub started: String,
+    pub last_active: String,
+    pub status: String,       // "active" | "idle" | "offline"
+    pub model: String,
+    pub project: String,
+    pub recent_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentActivity {
+    pub timestamp: String,
+    pub tool: String,
+    pub summary: String,
+    pub session_id: String,
+    pub project: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +134,7 @@ impl Default for UsageData {
             hourly_usage: vec![],
             models: vec![],
             daily_history: vec![],
+            recent_activities: vec![],
             active_project: None,
             last_updated: Utc::now().to_rfc3339(),
             status: "ok".into(),
@@ -226,6 +243,33 @@ struct LogMessage {
     role: Option<String>,
     model: Option<String>,
     usage: Option<TokenUsage>,
+    content: Option<serde_json::Value>,
+}
+
+fn extract_tool_uses(message: &LogMessage) -> Vec<(String, String)> {
+    let mut tools = vec![];
+    if let Some(serde_json::Value::Array(arr)) = &message.content {
+        for item in arr {
+            if item.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let summary = if let Some(input) = item.get("input") {
+                    if let Some(fp) = input.get("file_path").and_then(|v| v.as_str()) {
+                        fp.split('/').last().unwrap_or(fp).to_string()
+                    } else if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                        cmd.chars().take(40).collect()
+                    } else if let Some(fp) = input.get("path").and_then(|v| v.as_str()) {
+                        fp.split('/').last().unwrap_or(fp).to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                tools.push((name, summary));
+            }
+        }
+    }
+    tools
 }
 
 #[derive(Debug, Deserialize)]
@@ -263,6 +307,7 @@ fn scan_usage(data: &mut UsageData) {
     data.hourly_usage.clear();
     data.models.clear();
     data.daily_history.clear();
+    data.recent_activities.clear();
     data.plan = plan;
     data.custom_limit = custom_limit;
     data.active_project = active_project;
@@ -272,10 +317,15 @@ fn scan_usage(data: &mut UsageData) {
     let history_start = now - Duration::days(7); // 7-day history
 
     let mut session_map: HashMap<String, SessionInfo> = HashMap::new();
+    let mut session_last_model: HashMap<String, String> = HashMap::new();
+    let mut session_last_active: HashMap<String, DateTime<Utc>> = HashMap::new();
+    let mut session_project: HashMap<String, String> = HashMap::new();
+    let mut session_tools: HashMap<String, Vec<String>> = HashMap::new();
+    let mut all_activities: Vec<RecentActivity> = Vec::new();
     let mut project_map: HashMap<String, ProjectInfo> = HashMap::new();
     let mut hourly_map: HashMap<String, (u64, u64)> = HashMap::new();
     let mut model_map: HashMap<String, ModelAccum> = HashMap::new();
-    let mut daily_map: HashMap<String, (u64, f64, u64)> = HashMap::new(); // date -> (tokens, cost, msgs)
+    let mut daily_map: HashMap<String, (u64, f64, u64)> = HashMap::new();
     let mut first_timestamp: Option<DateTime<Utc>> = None;
 
     let pattern = claude_dir.join("projects").join("**").join("*.jsonl");
@@ -395,11 +445,22 @@ fn scan_usage(data: &mut UsageData) {
 
                     let sid = entry.session_id.clone().unwrap_or_else(|| "unknown".into());
                     let session = session_map.entry(sid.clone()).or_insert(SessionInfo {
-                        id: sid, tokens: 0, cost: 0.0, messages: 0,
+                        id: sid.clone(), tokens: 0, cost: 0.0, messages: 0,
                         started: entry.timestamp.clone().unwrap_or_default(),
+                        last_active: String::new(), status: String::new(),
+                        model: String::new(), project: String::new(),
+                        recent_tools: vec![],
                     });
                     session.tokens += tokens;
                     session.messages += 1;
+
+                    // Track last active time and model per session
+                    let prev = session_last_active.get(&sid);
+                    if prev.is_none() || dt > *prev.unwrap() {
+                        session_last_active.insert(sid.clone(), dt);
+                        session_last_model.insert(sid.clone(), model_name.clone());
+                    }
+                    session_project.entry(sid.clone()).or_insert_with(|| project_name.clone());
 
                     if let Some(proj) = project_map.get_mut(&project_name) {
                         proj.tokens += tokens;
@@ -411,6 +472,26 @@ fn scan_usage(data: &mut UsageData) {
             if let Some(cost) = entry.cost_usd {
                 if dt >= window_start {
                     data.total_cost += cost;
+                }
+            }
+
+            // Extract tool uses from assistant messages
+            if dt >= window_start {
+                if let Some(ref msg) = entry.message {
+                    if msg.role.as_deref() == Some("assistant") {
+                        let tool_uses = extract_tool_uses(msg);
+                        let sid = entry.session_id.clone().unwrap_or_else(|| "unknown".into());
+                        for (tool_name, summary) in &tool_uses {
+                            session_tools.entry(sid.clone()).or_default().push(tool_name.clone());
+                            all_activities.push(RecentActivity {
+                                timestamp: entry.timestamp.clone().unwrap_or_default(),
+                                tool: tool_name.clone(),
+                                summary: summary.clone(),
+                                session_id: sid.clone(),
+                                project: project_name.clone(),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -477,8 +558,40 @@ fn scan_usage(data: &mut UsageData) {
         data.session_start = Some(first.to_rfc3339());
     }
 
+    // Populate session metadata
+    for session in session_map.values_mut() {
+        let sid = &session.id;
+        if let Some(la) = session_last_active.get(sid) {
+            session.last_active = la.to_rfc3339();
+            let age_min = (now - *la).num_minutes();
+            session.status = if age_min < 5 { "active".into() }
+                else if age_min < 30 { "idle".into() }
+                else { "offline".into() };
+        } else {
+            session.status = "offline".into();
+        }
+        if let Some(m) = session_last_model.get(sid) {
+            session.model = m.split('/').last().unwrap_or(m).to_string();
+        }
+        if let Some(p) = session_project.get(sid) {
+            session.project = p.clone();
+        }
+        if let Some(tools) = session_tools.get(sid) {
+            let mut unique: Vec<String> = vec![];
+            for t in tools.iter().rev().take(10) {
+                if !unique.contains(t) { unique.push(t.clone()); }
+            }
+            session.recent_tools = unique;
+        }
+    }
+
     data.sessions = session_map.into_values().collect();
     data.sessions.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+
+    // Recent activities (last 20)
+    all_activities.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    all_activities.truncate(20);
+    data.recent_activities = all_activities;
     data.projects = project_map.into_values().collect();
     data.projects.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
