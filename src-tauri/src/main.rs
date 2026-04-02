@@ -48,32 +48,56 @@ fn set_project_filter(project: Option<String>, state: tauri::State<'_, Arc<Mutex
 }
 
 #[tauri::command]
-fn set_mini_mode(mini: bool, window: tauri::WebviewWindow) -> Result<(), String> {
-    if mini {
-        let _ = window.set_size(tauri::LogicalSize::new(280.0, 52.0));
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(200.0, 48.0)));
-    } else {
-        let _ = window.set_size(tauri::LogicalSize::new(360.0, 620.0));
-        let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 400.0)));
+fn set_view_mode(mode: String, window: tauri::WebviewWindow, state: tauri::State<'_, Arc<Mutex<String>>>) -> Result<(), String> {
+    let mut current = state.lock().unwrap();
+    *current = mode.clone();
+    match mode.as_str() {
+        "mini" => {
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(100.0, 100.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(120.0, 120.0));
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_decorations(false);
+        }
+        "full" => {
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(600.0, 400.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(800.0, 600.0));
+            let _ = window.set_always_on_top(false);
+            let _ = window.set_decorations(false);
+        }
+        _ => {
+            // compact (default)
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 400.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(360.0, 520.0));
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_decorations(false);
+        }
     }
     Ok(())
 }
 
+#[tauri::command]
+fn get_view_mode(state: tauri::State<'_, Arc<Mutex<String>>>) -> String {
+    state.lock().unwrap().clone()
+}
+
 fn main() {
     let usage_data = Arc::new(Mutex::new(UsageData::default()));
+    let view_mode = Arc::new(Mutex::new("compact".to_string()));
     let usage_for_watcher = usage_data.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .manage(usage_data)
+        .manage(view_mode)
         .invoke_handler(tauri::generate_handler![
             start_drag,
             get_usage,
             set_plan,
             set_custom_limit,
             set_project_filter,
-            set_mini_mode
+            set_view_mode,
+            get_view_mode
         ])
         .setup(move |app| {
             // Hide from Dock — tray-only mode
