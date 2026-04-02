@@ -1,15 +1,17 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config;
 mod monitor;
 
+use config::{load_config, save_config, AppConfig};
 use monitor::UsageData;
 use std::sync::{Arc, Mutex};
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    Manager,
+    Emitter, Manager,
 };
 
 #[tauri::command]
@@ -23,8 +25,41 @@ fn get_usage(state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
 }
 
 #[tauri::command]
-fn set_plan(plan: String, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
-    let mut data = state.lock().unwrap();
+fn get_config(state: tauri::State<'_, Arc<Mutex<AppConfig>>>) -> AppConfig {
+    state.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn save_plan(plan: String, custom_limit: Option<u64>,
+    config_state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+    usage_state: tauri::State<'_, Arc<Mutex<UsageData>>>,
+) -> Result<UsageData, String> {
+    // Update config
+    let mut cfg = config_state.lock().unwrap();
+    cfg.plan = Some(plan.clone());
+    cfg.custom_limit = custom_limit;
+    cfg.onboarding_done = Some(true);
+    save_config(&cfg)?;
+
+    // Update usage data
+    let mut data = usage_state.lock().unwrap();
+    data.plan = plan;
+    data.custom_limit = custom_limit;
+    data.update_limit();
+    Ok(data.clone())
+}
+
+#[tauri::command]
+fn set_plan(plan: String,
+    config_state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+    usage_state: tauri::State<'_, Arc<Mutex<UsageData>>>,
+) -> UsageData {
+    let mut cfg = config_state.lock().unwrap();
+    cfg.plan = Some(plan.clone());
+    cfg.custom_limit = None;
+    let _ = save_config(&cfg);
+
+    let mut data = usage_state.lock().unwrap();
     data.plan = plan;
     data.custom_limit = None;
     data.update_limit();
@@ -32,8 +67,16 @@ fn set_plan(plan: String, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> Usa
 }
 
 #[tauri::command]
-fn set_custom_limit(limit: u64, state: tauri::State<'_, Arc<Mutex<UsageData>>>) -> UsageData {
-    let mut data = state.lock().unwrap();
+fn set_custom_limit(limit: u64,
+    config_state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+    usage_state: tauri::State<'_, Arc<Mutex<UsageData>>>,
+) -> UsageData {
+    let mut cfg = config_state.lock().unwrap();
+    cfg.plan = Some("custom".into());
+    cfg.custom_limit = Some(limit);
+    let _ = save_config(&cfg);
+
+    let mut data = usage_state.lock().unwrap();
     data.plan = "custom".into();
     data.custom_limit = Some(limit);
     data.update_limit();
@@ -47,11 +90,8 @@ fn set_project_filter(project: Option<String>, state: tauri::State<'_, Arc<Mutex
     data.clone()
 }
 
-#[tauri::command]
-fn set_view_mode(mode: String, window: tauri::WebviewWindow, state: tauri::State<'_, Arc<Mutex<String>>>) -> Result<(), String> {
-    let mut current = state.lock().unwrap();
-    *current = mode.clone();
-    match mode.as_str() {
+fn apply_view_mode(window: &tauri::WebviewWindow, mode: &str) {
+    match mode {
         "mini" => {
             let _ = window.set_min_size(Some(tauri::LogicalSize::new(100.0, 100.0)));
             let _ = window.set_size(tauri::LogicalSize::new(120.0, 120.0));
@@ -65,13 +105,27 @@ fn set_view_mode(mode: String, window: tauri::WebviewWindow, state: tauri::State
             let _ = window.set_decorations(false);
         }
         _ => {
-            // compact (default)
             let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 400.0)));
             let _ = window.set_size(tauri::LogicalSize::new(360.0, 520.0));
             let _ = window.set_always_on_top(true);
             let _ = window.set_decorations(false);
         }
     }
+}
+
+#[tauri::command]
+fn set_view_mode(mode: String, window: tauri::WebviewWindow,
+    view_state: tauri::State<'_, Arc<Mutex<String>>>,
+    config_state: tauri::State<'_, Arc<Mutex<AppConfig>>>,
+) -> Result<(), String> {
+    let mut current = view_state.lock().unwrap();
+    *current = mode.clone();
+
+    let mut cfg = config_state.lock().unwrap();
+    cfg.view_mode = Some(mode.clone());
+    let _ = save_config(&cfg);
+
+    apply_view_mode(&window, &mode);
     Ok(())
 }
 
@@ -81,8 +135,20 @@ fn get_view_mode(state: tauri::State<'_, Arc<Mutex<String>>>) -> String {
 }
 
 fn main() {
-    let usage_data = Arc::new(Mutex::new(UsageData::default()));
-    let view_mode = Arc::new(Mutex::new("compact".to_string()));
+    // Load saved config
+    let saved_config = load_config();
+    let initial_plan = saved_config.plan.clone().unwrap_or_else(|| "max5".into());
+    let initial_custom = saved_config.custom_limit;
+    let initial_view = saved_config.view_mode.clone().unwrap_or_else(|| "compact".into());
+
+    let mut initial_usage = UsageData::default();
+    initial_usage.plan = initial_plan;
+    initial_usage.custom_limit = initial_custom;
+    initial_usage.update_limit();
+
+    let usage_data = Arc::new(Mutex::new(initial_usage));
+    let view_mode = Arc::new(Mutex::new(initial_view.clone()));
+    let app_config = Arc::new(Mutex::new(saved_config));
     let usage_for_watcher = usage_data.clone();
 
     tauri::Builder::default()
@@ -90,9 +156,12 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .manage(usage_data)
         .manage(view_mode)
+        .manage(app_config)
         .invoke_handler(tauri::generate_handler![
             start_drag,
             get_usage,
+            get_config,
+            save_plan,
             set_plan,
             set_custom_limit,
             set_project_filter,
@@ -100,7 +169,6 @@ fn main() {
             get_view_mode
         ])
         .setup(move |app| {
-            // Hide from Dock — tray-only mode
             #[cfg(target_os = "macos")]
             {
                 app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -108,9 +176,22 @@ fn main() {
 
             let handle = app.handle().clone();
 
+            // Tray menu with view mode options
             let show = MenuItemBuilder::with_id("show", "Show Scouter").build(app)?;
+            let mode_mini = MenuItemBuilder::with_id("mode_mini", "🔴 Mini").build(app)?;
+            let mode_compact = MenuItemBuilder::with_id("mode_compact", "📊 Compact").build(app)?;
+            let mode_full = MenuItemBuilder::with_id("mode_full", "🖥️ Full Dashboard").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let menu = MenuBuilder::new(app).item(&show).separator().item(&quit).build()?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&show)
+                .separator()
+                .item(&mode_mini)
+                .item(&mode_compact)
+                .item(&mode_full)
+                .separator()
+                .item(&quit)
+                .build()?;
 
             let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png")).unwrap();
 
@@ -119,17 +200,44 @@ fn main() {
                 .icon_as_template(true)
                 .menu(&menu)
                 .tooltip("Claude Scouter")
-                .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
+                .on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "show" => {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
                         }
+                        "mode_mini" | "mode_compact" | "mode_full" => {
+                            let mode = match event.id().as_ref() {
+                                "mode_mini" => "mini",
+                                "mode_full" => "full",
+                                _ => "compact",
+                            };
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                                apply_view_mode(&win, mode);
+
+                                // Save to config
+                                if let Some(cfg_state) = app.try_state::<Arc<Mutex<AppConfig>>>() {
+                                    let mut cfg = cfg_state.lock().unwrap();
+                                    cfg.view_mode = Some(mode.into());
+                                    let _ = save_config(&cfg);
+                                }
+                                if let Some(vm_state) = app.try_state::<Arc<Mutex<String>>>() {
+                                    let mut vm = vm_state.lock().unwrap();
+                                    *vm = mode.into();
+                                }
+                                // Notify frontend
+                                let _ = app.emit("view-mode-changed", mode);
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
                     }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click { .. } = event {
@@ -145,6 +253,11 @@ fn main() {
                     }
                 })
                 .build(app)?;
+
+            // Apply saved view mode on startup
+            if let Some(win) = app.get_webview_window("main") {
+                apply_view_mode(&win, &initial_view);
+            }
 
             let data = usage_for_watcher.clone();
             std::thread::spawn(move || {

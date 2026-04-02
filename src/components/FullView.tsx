@@ -88,8 +88,6 @@ export default function FullView({ data, onModeChange }: Props) {
           )}
         </div>
         <div className="f-titlebar-right">
-          <button className="f-mode-btn" onClick={() => onModeChange("compact")} title="Compact">⏬</button>
-          <button className="f-mode-btn" onClick={() => onModeChange("mini")} title="Mini">⏬⏬</button>
           <select value={data.plan} onChange={e => handlePlanChange(e.target.value)} className="f-plan-select">
             {PLANS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
           </select>

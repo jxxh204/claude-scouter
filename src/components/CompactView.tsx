@@ -63,8 +63,6 @@ export default function CompactView({ data, onModeChange }: Props) {
           <span className="c-title">Claude Scouter</span>
         </div>
         <div className="c-titlebar-right">
-          <button className="c-mode-btn" onClick={() => onModeChange("mini")} title="Mini">⏬</button>
-          <button className="c-mode-btn" onClick={() => onModeChange("full")} title="Full">⏫</button>
           <select value={data.plan} onChange={e => handlePlanChange(e.target.value)} className="c-plan-select">
             {PLANS.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
           </select>
