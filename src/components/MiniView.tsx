@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { UsageData, ViewMode } from "../types";
 import { formatTokens, formatTime, usageColor } from "../utils";
@@ -10,71 +10,63 @@ interface Props {
 }
 
 export default function MiniView({ data, onModeChange }: Props) {
-  const [pulse, setPulse] = useState(false);
+  const dragged = useRef(false);
+  const mouseDownPos = useRef({ x: 0, y: 0 });
 
-  useEffect(() => {
-    if (data.status === "critical") {
-      setPulse(true);
-    } else {
-      setPulse(false);
-    }
-  }, [data.status]);
-
-  const handleDrag = async (e: React.MouseEvent) => {
+  const handleMouseDown = async (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
+    dragged.current = false;
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
     await invoke("start_drag");
+    // After drag ends, mark as dragged if moved
   };
 
-  const handleClick = () => onModeChange("compact");
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+    if (dx > 5 || dy > 5) {
+      dragged.current = true;
+    }
+  };
+
+  const handleClick = () => {
+    if (!dragged.current) {
+      onModeChange("full");
+    }
+  };
 
   const percent = Math.min(100, data.usagePercent);
   const color = usageColor(data.status);
-
-  // SVG circular gauge
-  const size = 96;
-  const strokeWidth = 6;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (percent / 100) * circumference;
+  const isCritical = data.status === "critical";
+  const isWarning = data.status === "warning";
+  const activeSessions = data.sessions.filter(s => s.status === "active").length;
 
   return (
     <div
-      className={`mini-view ${pulse ? "pulse" : ""}`}
-      onMouseDown={handleDrag}
+      className={`mini-view ${isCritical ? "critical" : isWarning ? "warning" : ""}`}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
       onClick={handleClick}
       title="Click to expand"
     >
-      <svg width={size} height={size} className="mini-gauge">
-        {/* Background circle */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#1a1a2e"
-          strokeWidth={strokeWidth}
-        />
-        {/* Progress arc */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          className="mini-gauge-progress"
-        />
-      </svg>
+      {/* Progress bar */}
+      <div className="mini-progress">
+        <div className="mini-progress-fill" style={{ width: `${percent}%`, background: color }} />
+      </div>
 
-      <div className="mini-center">
+      {/* Info row */}
+      <div className="mini-info">
+        <span className="mini-dot" style={{ background: color }} />
         <span className="mini-pct" style={{ color }}>{percent.toFixed(0)}%</span>
+        <span className="mini-tokens">{formatTokens(data.totalTokens)}</span>
         {data.burnRate > 0 && (
-          <span className="mini-burn">{formatTokens(Math.round(data.burnRate))}/m</span>
+          <span className="mini-burn">🔥{formatTokens(Math.round(data.burnRate))}/m</span>
+        )}
+        {data.estimatedRemainingMin > 0 && data.burnRate > 0 && (
+          <span className="mini-time">⏱{formatTime(data.estimatedRemainingMin)}</span>
+        )}
+        {activeSessions > 0 && (
+          <span className="mini-sessions">💬{activeSessions}</span>
         )}
       </div>
     </div>

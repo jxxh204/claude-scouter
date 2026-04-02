@@ -76,4 +76,4 @@ export interface DailyPoint {
   messages: number;
 }
 
-export type ViewMode = "mini" | "compact" | "full";
+export type ViewMode = "mini" | "full";

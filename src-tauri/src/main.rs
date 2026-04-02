@@ -93,21 +93,16 @@ fn set_project_filter(project: Option<String>, state: tauri::State<'_, Arc<Mutex
 fn apply_view_mode(window: &tauri::WebviewWindow, mode: &str) {
     match mode {
         "mini" => {
-            let _ = window.set_min_size(Some(tauri::LogicalSize::new(100.0, 100.0)));
-            let _ = window.set_size(tauri::LogicalSize::new(120.0, 120.0));
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(240.0, 36.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(340.0, 40.0));
             let _ = window.set_always_on_top(true);
-            let _ = window.set_decorations(false);
-        }
-        "full" => {
-            let _ = window.set_min_size(Some(tauri::LogicalSize::new(600.0, 400.0)));
-            let _ = window.set_size(tauri::LogicalSize::new(800.0, 600.0));
-            let _ = window.set_always_on_top(false);
             let _ = window.set_decorations(false);
         }
         _ => {
-            let _ = window.set_min_size(Some(tauri::LogicalSize::new(300.0, 400.0)));
-            let _ = window.set_size(tauri::LogicalSize::new(360.0, 520.0));
-            let _ = window.set_always_on_top(true);
+            // full (default)
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(700.0, 500.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(900.0, 700.0));
+            let _ = window.set_always_on_top(false);
             let _ = window.set_decorations(false);
         }
     }
@@ -139,7 +134,7 @@ fn main() {
     let saved_config = load_config();
     let initial_plan = saved_config.plan.clone().unwrap_or_else(|| "max5".into());
     let initial_custom = saved_config.custom_limit;
-    let initial_view = saved_config.view_mode.clone().unwrap_or_else(|| "compact".into());
+    let initial_view = saved_config.view_mode.clone().unwrap_or_else(|| "full".into());
 
     let mut initial_usage = UsageData::default();
     initial_usage.plan = initial_plan;
@@ -176,19 +171,11 @@ fn main() {
 
             let handle = app.handle().clone();
 
-            // Tray menu with view mode options
             let show = MenuItemBuilder::with_id("show", "Show Scouter").build(app)?;
-            let mode_mini = MenuItemBuilder::with_id("mode_mini", "🔴 Mini").build(app)?;
-            let mode_compact = MenuItemBuilder::with_id("mode_compact", "📊 Compact").build(app)?;
-            let mode_full = MenuItemBuilder::with_id("mode_full", "🖥️ Full Dashboard").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
             let menu = MenuBuilder::new(app)
                 .item(&show)
-                .separator()
-                .item(&mode_mini)
-                .item(&mode_compact)
-                .item(&mode_full)
                 .separator()
                 .item(&quit)
                 .build()?;
@@ -206,31 +193,6 @@ fn main() {
                             if let Some(win) = app.get_webview_window("main") {
                                 let _ = win.show();
                                 let _ = win.set_focus();
-                            }
-                        }
-                        "mode_mini" | "mode_compact" | "mode_full" => {
-                            let mode = match event.id().as_ref() {
-                                "mode_mini" => "mini",
-                                "mode_full" => "full",
-                                _ => "compact",
-                            };
-                            if let Some(win) = app.get_webview_window("main") {
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                                apply_view_mode(&win, mode);
-
-                                // Save to config
-                                if let Some(cfg_state) = app.try_state::<Arc<Mutex<AppConfig>>>() {
-                                    let mut cfg = cfg_state.lock().unwrap();
-                                    cfg.view_mode = Some(mode.into());
-                                    let _ = save_config(&cfg);
-                                }
-                                if let Some(vm_state) = app.try_state::<Arc<Mutex<String>>>() {
-                                    let mut vm = vm_state.lock().unwrap();
-                                    *vm = mode.into();
-                                }
-                                // Notify frontend
-                                let _ = app.emit("view-mode-changed", mode);
                             }
                         }
                         "quit" => {
