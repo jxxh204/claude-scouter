@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub struct ArchNode {
     pub id: String,
     pub label: String,
-    pub kind: String, // "agent" | "plugin" | "hook" | "command" | "skill" | "project" | "permission"
+    pub kind: String,
     pub enabled: bool,
     pub details: HashMap<String, String>,
 }
@@ -32,285 +32,398 @@ fn claude_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude")
 }
 
+fn make_node(id: &str, label: &str, kind: &str, details: HashMap<String, String>) -> ArchNode {
+    ArchNode {
+        id: id.into(),
+        label: label.into(),
+        kind: kind.into(),
+        enabled: true,
+        details,
+    }
+}
+
+fn read_md_summary(path: &PathBuf) -> HashMap<String, String> {
+    let mut d = HashMap::new();
+    if let Ok(content) = fs::read_to_string(path) {
+        // First non-empty line as description
+        for line in content.lines() {
+            let trimmed = line.trim().trim_start_matches('#').trim();
+            if !trimmed.is_empty() {
+                let desc = if trimmed.len() > 80 {
+                    format!("{}…", &trimmed[..77])
+                } else {
+                    trimmed.to_string()
+                };
+                d.insert("description".into(), desc);
+                break;
+            }
+        }
+        let line_count = content.lines().count();
+        d.insert("lines".into(), line_count.to_string());
+    }
+    d
+}
+
+/// Scan a project workspace's .claude/ directory and extract architecture
+fn scan_project(
+    project_path: &PathBuf,
+    nodes: &mut Vec<ArchNode>,
+    edges: &mut Vec<ArchEdge>,
+) -> Option<String> {
+    let claude_dir = project_path.join(".claude");
+    if !claude_dir.exists() {
+        return None;
+    }
+
+    let project_name = project_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let proj_id = format!("project:{}", project_name);
+
+    let mut proj_details = HashMap::new();
+    proj_details.insert("path".into(), project_path.to_string_lossy().to_string());
+
+    // Check for CLAUDE.md at project root
+    let claude_md = project_path.join("CLAUDE.md");
+    if claude_md.exists() {
+        proj_details.insert("CLAUDE.md".into(), "✅".into());
+    }
+
+    // Check settings.local.json
+    let settings_local = claude_dir.join("settings.local.json");
+    if settings_local.exists() {
+        proj_details.insert("settings".into(), "✅".into());
+        if let Ok(content) = fs::read_to_string(&settings_local) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                // Extract MCP servers if any
+                if let Some(mcp) = val.get("mcpServers").and_then(|v| v.as_object()) {
+                    let names: Vec<&String> = mcp.keys().collect();
+                    if !names.is_empty() {
+                        proj_details.insert(
+                            "mcpServers".into(),
+                            names.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", "),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    nodes.push(ArchNode {
+        id: proj_id.clone(),
+        label: project_name.clone(),
+        kind: "project".into(),
+        enabled: true,
+        details: proj_details,
+    });
+
+    // --- Agents ---
+    let agents_dir = claude_dir.join("agents");
+    if agents_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&agents_dir) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".md") {
+                    continue;
+                }
+                let agent_name = fname.trim_end_matches(".md");
+                let agent_id = format!("{}:agent:{}", proj_id, agent_name);
+                let details = read_md_summary(&entry.path());
+
+                nodes.push(make_node(&agent_id, agent_name, "agent", details));
+                edges.push(ArchEdge {
+                    from: proj_id.clone(),
+                    to: agent_id.clone(),
+                    label: "has agent".into(),
+                });
+
+                // Try to infer agent → rule connections from agent file content
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    let content_lower = content.to_lowercase();
+                    // Check if agent mentions any rule files
+                    let rules_dir = claude_dir.join("rules");
+                    if rules_dir.exists() {
+                        if let Ok(rule_entries) = fs::read_dir(&rules_dir) {
+                            for rule_entry in rule_entries.flatten() {
+                                let rule_fname =
+                                    rule_entry.file_name().to_string_lossy().to_string();
+                                let rule_name = rule_fname.trim_end_matches(".md");
+                                let rule_id = format!("{}:rule:{}", proj_id, rule_name);
+
+                                // Check if agent content references this rule by keyword match
+                                let rule_keywords: Vec<&str> =
+                                    rule_name.split('-').collect();
+                                let matches = rule_keywords.iter().any(|kw| {
+                                    kw.len() > 3 && content_lower.contains(*kw)
+                                });
+
+                                if matches {
+                                    edges.push(ArchEdge {
+                                        from: agent_id.clone(),
+                                        to: rule_id,
+                                        label: "follows".into(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Rules ---
+    let rules_dir = claude_dir.join("rules");
+    if rules_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&rules_dir) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                if !fname.ends_with(".md") {
+                    continue;
+                }
+                let rule_name = fname.trim_end_matches(".md");
+                let rule_id = format!("{}:rule:{}", proj_id, rule_name);
+
+                // Skip if already added
+                if nodes.iter().any(|n| n.id == rule_id) {
+                    continue;
+                }
+
+                let details = read_md_summary(&entry.path());
+                nodes.push(make_node(&rule_id, rule_name, "rule", details));
+                edges.push(ArchEdge {
+                    from: proj_id.clone(),
+                    to: rule_id,
+                    label: "has rule".into(),
+                });
+            }
+        }
+    }
+
+    // --- Skills ---
+    let skills_dir = claude_dir.join("skills");
+    if skills_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&skills_dir) {
+            for entry in entries.flatten() {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let skill_name = entry.file_name().to_string_lossy().to_string();
+                let skill_id = format!("{}:skill:{}", proj_id, skill_name);
+                let mut d = HashMap::new();
+
+                // Count files in skill dir
+                if let Ok(sub) = fs::read_dir(entry.path()) {
+                    let files: Vec<String> = sub
+                        .flatten()
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect();
+                    d.insert("files".into(), files.join(", "));
+                }
+
+                // Read skill's main md if exists
+                let skill_md = entry.path().join(format!("{}.md", skill_name));
+                if skill_md.exists() {
+                    let summary = read_md_summary(&skill_md);
+                    if let Some(desc) = summary.get("description") {
+                        d.insert("description".into(), desc.clone());
+                    }
+                }
+
+                nodes.push(make_node(&skill_id, &skill_name, "skill", d));
+                edges.push(ArchEdge {
+                    from: proj_id.clone(),
+                    to: skill_id,
+                    label: "has skill".into(),
+                });
+            }
+        }
+    }
+
+    // --- Commands (project-level from ~/.claude/commands/) ---
+    let commands_dir = claude_dir.join("commands");
+    if commands_dir.exists() {
+        scan_commands(&commands_dir, &proj_id, nodes, edges);
+    }
+
+    Some(proj_id)
+}
+
+fn scan_commands(
+    dir: &PathBuf,
+    parent_id: &str,
+    nodes: &mut Vec<ArchNode>,
+    edges: &mut Vec<ArchEdge>,
+) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let fname = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+            if is_dir {
+                // Recurse into subdirectory
+                let sub_id = format!("{}:cmdgroup:{}", parent_id, fname);
+                let mut d = HashMap::new();
+                d.insert("type".into(), "group".into());
+                nodes.push(make_node(&sub_id, &fname, "command", d));
+                edges.push(ArchEdge {
+                    from: parent_id.into(),
+                    to: sub_id.clone(),
+                    label: "has command".into(),
+                });
+                scan_commands(&entry.path(), &sub_id, nodes, edges);
+            } else if fname.ends_with(".md") {
+                let cmd_name = fname.trim_end_matches(".md");
+                let cmd_id = format!("{}:cmd:{}", parent_id, cmd_name);
+                let details = read_md_summary(&entry.path());
+                nodes.push(make_node(&cmd_id, cmd_name, "command", details));
+                edges.push(ArchEdge {
+                    from: parent_id.into(),
+                    to: cmd_id,
+                    label: "has command".into(),
+                });
+            }
+        }
+    }
+}
+
 pub fn read_architecture() -> ArchitectureData {
     let mut nodes: Vec<ArchNode> = Vec::new();
     let mut edges: Vec<ArchEdge> = Vec::new();
     let base = claude_dir();
 
-    // Read settings.json
+    // --- Global settings ---
     let settings_path = base.join("settings.json");
     let settings: serde_json::Value = fs::read_to_string(&settings_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(serde_json::Value::Null);
 
-    // --- Central Agent Node ---
-    let agent_id = "agent:claude-code".to_string();
-    let mut agent_details = HashMap::new();
-    if let Some(mode) = settings.get("teammateMode").and_then(|v| v.as_str()) {
-        agent_details.insert("teammateMode".into(), mode.into());
-    }
-    if let Some(thinking) = settings.get("alwaysThinkingEnabled").and_then(|v| v.as_bool()) {
-        agent_details.insert("alwaysThinking".into(), thinking.to_string());
-    }
-    nodes.push(ArchNode {
-        id: agent_id.clone(),
-        label: "Claude Code".into(),
-        kind: "agent".into(),
-        enabled: true,
-        details: agent_details,
-    });
-
-    // --- Plugins ---
-    if let Some(plugins) = settings.get("enabledPlugins").and_then(|v| v.as_object()) {
-        for (name, val) in plugins {
-            let enabled = val.as_bool().unwrap_or(false);
-            let plug_id = format!("plugin:{}", name);
-            let short_name = name.split('@').next().unwrap_or(name);
-            let mut d = HashMap::new();
-            d.insert("fullId".into(), name.clone());
-            d.insert("enabled".into(), enabled.to_string());
-            nodes.push(ArchNode {
-                id: plug_id.clone(),
-                label: short_name.into(),
-                kind: "plugin".into(),
-                enabled,
-                details: d,
-            });
-            if enabled {
-                edges.push(ArchEdge {
-                    from: agent_id.clone(),
-                    to: plug_id,
-                    label: "uses".into(),
-                });
-            }
-        }
-    }
-
-    // --- Hooks ---
+    // --- Global Hooks ---
     if let Some(hooks) = settings.get("hooks").and_then(|v| v.as_object()) {
         for (hook_name, hook_val) in hooks {
-            let hook_id = format!("hook:{}", hook_name);
+            let hook_id = format!("global:hook:{}", hook_name);
             let mut d = HashMap::new();
-
-            // Count handlers
             let handler_count = hook_val.as_array().map(|a| a.len()).unwrap_or(0);
             d.insert("handlers".into(), handler_count.to_string());
-
-            // Extract first command as preview
-            if let Some(arr) = hook_val.as_array() {
-                if let Some(first) = arr.first() {
-                    if let Some(hooks_inner) = first.get("hooks").and_then(|v| v.as_array()) {
-                        if let Some(cmd) = hooks_inner.first()
-                            .and_then(|h| h.get("command"))
-                            .and_then(|c| c.as_str())
-                        {
-                            let short = if cmd.len() > 60 {
-                                format!("{}...", &cmd[..57])
-                            } else {
-                                cmd.to_string()
-                            };
-                            d.insert("command".into(), short);
-                        }
-                    }
-                }
-            }
-
-            nodes.push(ArchNode {
-                id: hook_id.clone(),
-                label: hook_name.clone(),
-                kind: "hook".into(),
-                enabled: true,
-                details: d,
-            });
-            edges.push(ArchEdge {
-                from: agent_id.clone(),
-                to: hook_id,
-                label: "triggers".into(),
-            });
+            d.insert("scope".into(), "global".into());
+            nodes.push(make_node(&hook_id, hook_name, "hook", d));
         }
     }
 
-    // --- Commands (from ~/.claude/commands/) ---
-    let commands_dir = base.join("commands");
-    if commands_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&commands_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                let cmd_id = format!("command:{}", name);
-
-                let mut d = HashMap::new();
-                if is_dir {
-                    // Count files in command dir
-                    if let Ok(sub) = fs::read_dir(entry.path()) {
-                        let count = sub.count();
-                        d.insert("files".into(), count.to_string());
-                    }
-                    d.insert("type".into(), "directory".into());
-                } else {
-                    d.insert("type".into(), "file".into());
-                    // Read first line as description
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
-                        let first_line = content.lines().next().unwrap_or("").trim();
-                        if !first_line.is_empty() && first_line.len() <= 80 {
-                            d.insert("description".into(), first_line.into());
-                        }
-                    }
-                }
-
-                let label = name.trim_end_matches(".md").to_string();
-                nodes.push(ArchNode {
-                    id: cmd_id.clone(),
-                    label,
-                    kind: "command".into(),
-                    enabled: true,
-                    details: d,
-                });
-                edges.push(ArchEdge {
-                    from: agent_id.clone(),
-                    to: cmd_id,
-                    label: "has".into(),
-                });
-            }
-        }
+    // --- Global Commands ---
+    let global_cmds_dir = base.join("commands");
+    if global_cmds_dir.exists() {
+        let global_cmd_id = "global:commands".to_string();
+        let mut d = HashMap::new();
+        d.insert("scope".into(), "global".into());
+        nodes.push(make_node(&global_cmd_id, "Global Commands", "command", d));
+        scan_commands(&global_cmds_dir, &global_cmd_id, &mut nodes, &mut edges);
     }
 
-    // --- Skills (from ~/.claude/skills/) ---
-    let skills_dir = base.join("skills");
-    if skills_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&skills_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let skill_id = format!("skill:{}", name);
-                let mut d = HashMap::new();
-
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    if let Ok(sub) = fs::read_dir(entry.path()) {
-                        let count = sub.count();
-                        d.insert("files".into(), count.to_string());
-                    }
-                }
-
-                let label = name.trim_end_matches(".md").to_string();
-                nodes.push(ArchNode {
-                    id: skill_id.clone(),
-                    label,
-                    kind: "skill".into(),
-                    enabled: true,
-                    details: d,
-                });
-                edges.push(ArchEdge {
-                    from: agent_id.clone(),
-                    to: skill_id,
-                    label: "uses".into(),
-                });
-            }
-        }
-    }
-
-    // --- Projects (from ~/.claude/projects/) ---
-    let projects_dir = base.join("projects");
-    if projects_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&projects_dir) {
-            let mut count = 0;
+    // --- Global Skills ---
+    let global_skills_dir = base.join("skills");
+    if global_skills_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&global_skills_dir) {
             for entry in entries.flatten() {
                 if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     continue;
                 }
-                count += 1;
-                if count > 15 {
-                    // Limit to avoid clutter
-                    break;
-                }
-
-                let name = entry.file_name().to_string_lossy().to_string();
-                // Decode path: -Users-name-project becomes /Users/name/project
-                let decoded = name.replace('-', "/");
-                let short = decoded.split('/').last().unwrap_or(&name);
-                let proj_id = format!("project:{}", name);
+                let skill_name = entry.file_name().to_string_lossy().to_string();
+                let skill_id = format!("global:skill:{}", skill_name);
                 let mut d = HashMap::new();
-                d.insert("path".into(), decoded.clone());
-
-                // Check for project-specific CLAUDE.md or settings
-                let proj_path = entry.path();
-                if proj_path.join("CLAUDE.md").exists() {
-                    d.insert("hasCLAUDE.md".into(), "true".into());
-                }
-                if proj_path.join("settings.json").exists() {
-                    d.insert("hasSettings".into(), "true".into());
-                }
-                // Count MCP configs
-                let mcp_path = proj_path.join("mcpServers");
-                if mcp_path.exists() {
-                    if let Ok(mcp_entries) = fs::read_dir(&mcp_path) {
-                        let mcp_count = mcp_entries.count();
-                        if mcp_count > 0 {
-                            d.insert("mcpServers".into(), mcp_count.to_string());
-                        }
-                    }
-                }
-
-                nodes.push(ArchNode {
-                    id: proj_id.clone(),
-                    label: short.into(),
-                    kind: "project".into(),
-                    enabled: true,
-                    details: d,
-                });
-                edges.push(ArchEdge {
-                    from: agent_id.clone(),
-                    to: proj_id,
-                    label: "workspace".into(),
-                });
+                d.insert("scope".into(), "global".into());
+                nodes.push(make_node(&skill_id, &skill_name, "skill", d));
             }
         }
     }
 
-    // --- Permissions (group allowed tools) ---
-    if let Some(perms) = settings.pointer("/permissions/allow").and_then(|v| v.as_array()) {
-        // Group by tool type
-        let mut tool_groups: HashMap<String, Vec<String>> = HashMap::new();
-        for perm in perms {
-            if let Some(s) = perm.as_str() {
-                let tool_type = if s.starts_with("Bash(") {
-                    "Bash"
-                } else if s.starts_with("Read(") {
-                    "Read"
-                } else if s.starts_with("Write(") {
-                    "Write"
-                } else if s.starts_with("mcp__") {
-                    "MCP"
-                } else {
-                    "Other"
-                };
-                tool_groups.entry(tool_type.into()).or_default().push(s.into());
+    // --- Global Plugins ---
+    if let Some(plugins) = settings.get("enabledPlugins").and_then(|v| v.as_object()) {
+        for (name, val) in plugins {
+            let enabled = val.as_bool().unwrap_or(false);
+            if !enabled {
+                continue;
             }
-        }
-
-        for (group, items) in &tool_groups {
-            let perm_id = format!("permission:{}", group);
+            let short = name.split('@').next().unwrap_or(name);
+            let plug_id = format!("global:plugin:{}", short);
             let mut d = HashMap::new();
-            d.insert("count".into(), items.len().to_string());
-            // Show first few items
-            let preview: Vec<&str> = items.iter().take(3).map(|s| s.as_str()).collect();
-            d.insert("items".into(), preview.join(", "));
-            if items.len() > 3 {
-                d.insert("more".into(), format!("+{}", items.len() - 3));
-            }
-
+            d.insert("fullId".into(), name.clone());
+            d.insert("scope".into(), "global".into());
             nodes.push(ArchNode {
-                id: perm_id.clone(),
-                label: format!("{} ({})", group, items.len()),
-                kind: "permission".into(),
+                id: plug_id,
+                label: short.into(),
+                kind: "plugin".into(),
                 enabled: true,
                 details: d,
             });
-            edges.push(ArchEdge {
-                from: agent_id.clone(),
-                to: perm_id,
-                label: "allowed".into(),
-            });
+        }
+    }
+
+    // --- Scan projects ---
+    // Find project workspaces from ~/.claude/projects/ directory names
+    let projects_dir = base.join("projects");
+    let mut scanned_paths: Vec<PathBuf> = Vec::new();
+
+    if projects_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&projects_dir) {
+            for entry in entries.flatten() {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    continue;
+                }
+                let dirname = entry.file_name().to_string_lossy().to_string();
+                // Decode: -Users-name-project → /Users/name/project
+                let decoded_path = PathBuf::from(format!("/{}", dirname.replace('-', "/")));
+                // Fix: the encoding actually replaces / with - but keeps first char
+                // Try the raw decoded path
+                if decoded_path.join(".claude").exists() {
+                    scanned_paths.push(decoded_path);
+                }
+            }
+        }
+    }
+
+    // Also scan some common locations
+    if let Some(home) = dirs::home_dir() {
+        for dir_name in &["project", "projects", "dev", "work", "Study"] {
+            let parent = home.join(dir_name);
+            if parent.exists() {
+                if let Ok(entries) = fs::read_dir(&parent) {
+                    for entry in entries.flatten() {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            let p = entry.path();
+                            if p.join(".claude").exists() && !scanned_paths.contains(&p) {
+                                scanned_paths.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Limit to 20 projects
+    scanned_paths.truncate(20);
+
+    let mut project_ids: Vec<String> = Vec::new();
+    for path in &scanned_paths {
+        if let Some(pid) = scan_project(path, &mut nodes, &mut edges) {
+            project_ids.push(pid);
+        }
+    }
+
+    // Connect projects to global hooks
+    for pid in &project_ids {
+        for node in &nodes {
+            if node.id.starts_with("global:hook:") {
+                edges.push(ArchEdge {
+                    from: node.id.clone(),
+                    to: pid.clone(),
+                    label: "applies to".into(),
+                });
+            }
         }
     }
 

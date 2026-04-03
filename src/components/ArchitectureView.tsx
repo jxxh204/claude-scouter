@@ -16,26 +16,26 @@ interface LayoutNode extends ArchNode {
 }
 
 const KIND_COLORS: Record<string, string> = {
-  agent: "#8b5cf6",
-  plugin: "#3b82f6",
-  hook: "#f59e0b",
-  command: "#22c55e",
-  skill: "#ec4899",
-  project: "#06b6d4",
-  permission: "#ef4444",
+  project: "#8b5cf6",
+  agent: "#ec4899",
+  rule: "#f59e0b",
+  skill: "#22c55e",
+  command: "#3b82f6",
+  hook: "#ef4444",
+  plugin: "#06b6d4",
 };
 
 const KIND_ICONS: Record<string, string> = {
-  agent: "🤖",
-  plugin: "🔌",
-  hook: "🪝",
-  command: "⌨️",
-  skill: "⚡",
   project: "📁",
-  permission: "🔐",
+  agent: "🤖",
+  rule: "📜",
+  skill: "⚡",
+  command: "⌨️",
+  hook: "🪝",
+  plugin: "🔌",
 };
 
-const ALL_KINDS = ["agent", "plugin", "hook", "command", "skill", "project", "permission"];
+const ALL_KINDS = ["project", "agent", "rule", "skill", "command", "hook", "plugin"];
 
 function forceLayout(
   nodes: LayoutNode[],
@@ -299,7 +299,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
       y: 0,
       vx: 0,
       vy: 0,
-      radius: n.kind === "agent" ? 28 : n.kind === "project" ? 18 : 16,
+      radius: n.kind === "project" ? 26 : n.kind === "agent" ? 20 : 16,
     }));
 
     forceLayout(nodes, archData.edges, w, h);
@@ -466,7 +466,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
                 y: 0,
                 vx: 0,
                 vy: 0,
-                radius: n.kind === "agent" ? 28 : n.kind === "project" ? 18 : 16,
+                radius: n.kind === "project" ? 26 : n.kind === "agent" ? 20 : 16,
               }));
               forceLayout(nodes, archData.edges, rect.width, rect.height);
               setLayoutNodes(nodes);
