@@ -1,9 +1,11 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod architecture;
 mod config;
 mod monitor;
 
+use architecture::ArchitectureData;
 use config::{load_config, save_config, AppConfig};
 use monitor::UsageData;
 use std::sync::{Arc, Mutex};
@@ -98,6 +100,12 @@ fn apply_view_mode(window: &tauri::WebviewWindow, mode: &str) {
             let _ = window.set_always_on_top(true);
             let _ = window.set_decorations(false);
         }
+        "arch" => {
+            let _ = window.set_min_size(Some(tauri::LogicalSize::new(800.0, 600.0)));
+            let _ = window.set_size(tauri::LogicalSize::new(1000.0, 750.0));
+            let _ = window.set_always_on_top(false);
+            let _ = window.set_decorations(false);
+        }
         _ => {
             // full (default)
             let _ = window.set_min_size(Some(tauri::LogicalSize::new(700.0, 500.0)));
@@ -127,6 +135,11 @@ fn set_view_mode(mode: String, window: tauri::WebviewWindow,
 #[tauri::command]
 fn get_view_mode(state: tauri::State<'_, Arc<Mutex<String>>>) -> String {
     state.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_architecture() -> ArchitectureData {
+    architecture::read_architecture()
 }
 
 fn main() {
@@ -161,7 +174,8 @@ fn main() {
             set_custom_limit,
             set_project_filter,
             set_view_mode,
-            get_view_mode
+            get_view_mode,
+            get_architecture
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

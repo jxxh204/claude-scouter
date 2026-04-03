@@ -1,0 +1,178 @@
+.arch-view {
+  width: 100vw;
+  height: 100vh;
+  background: #0a0a0f;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: "JetBrains Mono", "SF Mono", monospace;
+  color: #e0e0e0;
+}
+
+.arch-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(20, 20, 30, 0.95);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.arch-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arch-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c4b5fd;
+}
+
+.arch-subtitle {
+  font-size: 11px;
+  color: #666;
+}
+
+.arch-titlebar-right {
+  display: flex;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.arch-btn {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #c4b5fd;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.arch-btn:hover {
+  background: rgba(139, 92, 246, 0.3);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+.arch-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.arch-canvas-wrap canvas {
+  display: block;
+}
+
+/* Legend */
+.arch-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(10, 10, 15, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  font-size: 11px;
+  z-index: 5;
+}
+
+.arch-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.arch-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Tooltip */
+.arch-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 35, 0.95);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 11px;
+  max-width: 260px;
+  z-index: 20;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.arch-tooltip-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: #fff;
+}
+
+.arch-tooltip-kind {
+  color: #8b5cf6;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.arch-tooltip-detail {
+  color: #999;
+  line-height: 1.5;
+}
+
+.arch-tooltip-detail span {
+  display: block;
+}
+
+/* Filter bar */
+.arch-filters {
+  display: flex;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(15, 15, 25, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.arch-filter-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #888;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.arch-filter-btn.active {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #c4b5fd;
+}
+
+.arch-filter-btn:hover {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+/* Stats bar */
+.arch-stats {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 10px;
+  color: #555;
+  z-index: 5;
+}

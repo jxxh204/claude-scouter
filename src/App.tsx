@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { UsageData, ViewMode } from "./types";
 import MiniView from "./components/MiniView";
 import FullView from "./components/FullView";
+import ArchitectureView from "./components/ArchitectureView";
 import Onboarding from "./components/Onboarding";
 
 interface AppConfig {
@@ -101,6 +102,8 @@ export default function App() {
   switch (viewMode) {
     case "mini":
       return <MiniView data={data} onModeChange={handleModeChange} />;
+    case "arch":
+      return <ArchitectureView onModeChange={handleModeChange} />;
     case "full":
     default:
       return <FullView data={data} onModeChange={handleModeChange} />;

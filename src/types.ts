@@ -76,4 +76,23 @@ export interface DailyPoint {
   messages: number;
 }
 
-export type ViewMode = "mini" | "full";
+export type ViewMode = "mini" | "full" | "arch";
+
+export interface ArchNode {
+  id: string;
+  label: string;
+  kind: string;
+  enabled: boolean;
+  details: Record<string, string>;
+}
+
+export interface ArchEdge {
+  from: string;
+  to: string;
+  label: string;
+}
+
+export interface ArchitectureData {
+  nodes: ArchNode[];
+  edges: ArchEdge[];
+}
