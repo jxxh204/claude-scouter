@@ -49,11 +49,7 @@ fn read_md_summary(path: &PathBuf) -> HashMap<String, String> {
         for line in content.lines() {
             let trimmed = line.trim().trim_start_matches('#').trim();
             if !trimmed.is_empty() && trimmed != "---" {
-                let desc = if trimmed.len() > 80 {
-                    format!("{}…", &trimmed[..77])
-                } else {
-                    trimmed.to_string()
-                };
+                let desc: String = trimmed.chars().take(80).collect();
                 d.insert("description".into(), desc);
                 break;
             }
@@ -74,26 +70,31 @@ fn parse_agent_frontmatter(path: &PathBuf) -> HashMap<String, String> {
 
     let trimmed = content.trim();
     if !trimmed.starts_with("---") {
-        // No frontmatter, just read as summary
         return read_md_summary(path);
     }
 
-    // Find closing ---
-    let rest = &trimmed[3..];
+    // Find closing --- (safe with char boundaries)
+    let rest = match trimmed.get(3..) {
+        Some(r) => r,
+        None => return read_md_summary(path),
+    };
     let end = match rest.find("---") {
         Some(pos) => pos,
         None => return read_md_summary(path),
     };
 
-    let frontmatter = &rest[..end];
-    let body = rest[end + 3..].trim();
+    let frontmatter = match rest.get(..end) {
+        Some(f) => f,
+        None => return d,
+    };
+    let body = rest.get(end + 3..).unwrap_or("").trim();
 
     // Parse simple YAML key: value pairs
     for line in frontmatter.lines() {
         let line = line.trim();
         if let Some(pos) = line.find(':') {
-            let key = line[..pos].trim().to_string();
-            let val = line[pos + 1..].trim().to_string();
+            let key = line.get(..pos).unwrap_or("").trim().to_string();
+            let val = line.get(pos + 1..).unwrap_or("").trim().to_string();
             if !key.is_empty() && !val.is_empty() {
                 d.insert(key, val);
             }
@@ -102,16 +103,10 @@ fn parse_agent_frontmatter(path: &PathBuf) -> HashMap<String, String> {
 
     // Extract body description (first non-empty line after frontmatter)
     if !body.is_empty() {
-        let first_line = body.lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("")
-            .trim();
-        if !first_line.is_empty() {
-            let desc = if first_line.len() > 100 {
-                format!("{}…", &first_line[..97])
-            } else {
-                first_line.to_string()
-            };
+        if let Some(first_line) = body.lines().find(|l| !l.trim().is_empty()) {
+            let first_line = first_line.trim();
+            // Safe truncation at char boundary
+            let desc: String = first_line.chars().take(100).collect();
             d.entry("role".into()).or_insert(desc);
         }
     }
@@ -464,7 +459,16 @@ pub fn read_architecture() -> ArchitectureData {
 
     let mut project_ids: Vec<String> = Vec::new();
     for path in &scanned_paths {
-        if let Some(pid) = scan_project(path, &mut nodes, &mut edges) {
+        // Wrap in catch_unwind to prevent panics from crashing the app
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut n = Vec::new();
+            let mut e = Vec::new();
+            let pid = scan_project(path, &mut n, &mut e);
+            (pid, n, e)
+        }));
+        if let Ok((Some(pid), mut n, mut e)) = result {
+            nodes.append(&mut n);
+            edges.append(&mut e);
             project_ids.push(pid);
         }
     }
