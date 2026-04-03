@@ -7,14 +7,6 @@ interface Props {
   onModeChange: (mode: ViewMode) => void;
 }
 
-interface LayoutNode extends ArchNode {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-}
-
 const KIND_COLORS: Record<string, string> = {
   project: "#8b5cf6",
   agent: "#ec4899",
@@ -35,367 +27,177 @@ const KIND_ICONS: Record<string, string> = {
   plugin: "🔌",
 };
 
-const ALL_KINDS = ["project", "agent", "rule", "skill", "command", "hook", "plugin"];
-
-function forceLayout(
-  nodes: LayoutNode[],
-  edges: ArchEdge[],
-  width: number,
-  height: number,
-  iterations: number = 120
-) {
-  // Initialize positions in a circle
-  const cx = width / 2;
-  const cy = height / 2;
-  const r = Math.min(width, height) * 0.3;
-  nodes.forEach((n, i) => {
-    const angle = (i / nodes.length) * Math.PI * 2;
-    n.x = cx + r * Math.cos(angle) + (Math.random() - 0.5) * 40;
-    n.y = cy + r * Math.sin(angle) + (Math.random() - 0.5) * 40;
-    n.vx = 0;
-    n.vy = 0;
-  });
-
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-  for (let iter = 0; iter < iterations; iter++) {
-    const alpha = 1 - iter / iterations;
-    const repulsion = 8000 * alpha;
-    const attraction = 0.005 * alpha;
-    const damping = 0.85;
-
-    // Repulsion between all pairs
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i];
-        const b = nodes[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = repulsion / (dist * dist);
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-        a.vx -= fx;
-        a.vy -= fy;
-        b.vx += fx;
-        b.vy += fy;
-      }
-    }
-
-    // Attraction along edges
-    for (const edge of edges) {
-      const a = nodeMap.get(edge.from);
-      const b = nodeMap.get(edge.to);
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const idealLen = 180;
-      const force = (dist - idealLen) * attraction;
-      const fx = (dx / dist) * force;
-      const fy = (dy / dist) * force;
-      a.vx += fx;
-      a.vy += fy;
-      b.vx -= fx;
-      b.vy -= fy;
-    }
-
-    // Center gravity
-    for (const n of nodes) {
-      n.vx += (cx - n.x) * 0.001 * alpha;
-      n.vy += (cy - n.y) * 0.001 * alpha;
-    }
-
-    // Apply velocity
-    const pad = 60;
-    for (const n of nodes) {
-      n.vx *= damping;
-      n.vy *= damping;
-      n.x += n.vx;
-      n.y += n.vy;
-      n.x = Math.max(pad, Math.min(width - pad, n.x));
-      n.y = Math.max(pad, Math.min(height - pad, n.y));
-    }
-  }
+interface ProjectGroup {
+  project: ArchNode;
+  agents: ArchNode[];
+  rules: ArchNode[];
+  skills: ArchNode[];
+  commands: ArchNode[];
+  // agent→rule connections
+  agentRuleEdges: ArchEdge[];
 }
 
-function drawGraph(
-  ctx: CanvasRenderingContext2D,
-  nodes: LayoutNode[],
-  edges: ArchEdge[],
-  width: number,
-  height: number,
-  hoveredId: string | null,
-  visibleKinds: Set<string>,
-  dpr: number
-) {
-  ctx.save();
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, width, height);
+function groupByProject(data: ArchitectureData): {
+  projects: ProjectGroup[];
+  globalHooks: ArchNode[];
+  globalPlugins: ArchNode[];
+  globalCommands: ArchNode[];
+  globalSkills: ArchNode[];
+} {
+  const nodeMap = new Map(data.nodes.map((n) => [n.id, n]));
+  const projectNodes = data.nodes.filter((n) => n.kind === "project");
+  const projects: ProjectGroup[] = [];
 
-  // Grid background
-  ctx.strokeStyle = "rgba(255,255,255,0.03)";
-  ctx.lineWidth = 1;
-  const gridSize = 30;
-  for (let x = 0; x < width; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-  }
-  for (let y = 0; y < height; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  }
-
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const visibleNodes = new Set(nodes.filter((n) => visibleKinds.has(n.kind)).map((n) => n.id));
-
-  // Draw edges
-  for (const edge of edges) {
-    const a = nodeMap.get(edge.from);
-    const b = nodeMap.get(edge.to);
-    if (!a || !b) continue;
-    if (!visibleNodes.has(a.id) || !visibleNodes.has(b.id)) continue;
-
-    const isHighlight =
-      hoveredId && (edge.from === hoveredId || edge.to === hoveredId);
-    const isDisabled = edge.label === "disabled";
-
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = isHighlight
-      ? "rgba(139,92,246,0.7)"
-      : isDisabled
-      ? "rgba(255,255,255,0.06)"
-      : "rgba(255,255,255,0.12)";
-    ctx.lineWidth = isHighlight ? 2 : 1;
-    if (isDisabled) {
-      ctx.setLineDash([4, 4]);
-    } else {
-      ctx.setLineDash([]);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Edge label (only on hover)
-    if (isHighlight && edge.label) {
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2;
-      ctx.font = "9px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "rgba(139,92,246,0.6)";
-      ctx.textAlign = "center";
-      ctx.fillText(edge.label, mx, my - 4);
-    }
-  }
-
-  // Draw nodes
-  for (const node of nodes) {
-    if (!visibleNodes.has(node.id)) continue;
-
-    const isHovered = node.id === hoveredId;
-    const color = KIND_COLORS[node.kind] || "#666";
-    const r = node.radius;
-
-    // Glow
-    if (isHovered) {
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, r + 8, 0, Math.PI * 2);
-      const glow = ctx.createRadialGradient(
-        node.x,
-        node.y,
-        r,
-        node.x,
-        node.y,
-        r + 8
-      );
-      glow.addColorStop(0, color + "40");
-      glow.addColorStop(1, "transparent");
-      ctx.fillStyle = glow;
-      ctx.fill();
-    }
-
-    // Node circle
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = node.enabled
-      ? color + (isHovered ? "dd" : "88")
-      : "rgba(50,50,50,0.6)";
-    ctx.fill();
-    ctx.strokeStyle = node.enabled
-      ? color + (isHovered ? "ff" : "66")
-      : "rgba(80,80,80,0.4)";
-    ctx.lineWidth = isHovered ? 2 : 1;
-    ctx.stroke();
-
-    // Icon
-    const icon = KIND_ICONS[node.kind] || "●";
-    ctx.font = `${r * 0.9}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(icon, node.x, node.y);
-
-    // Label
-    ctx.font = `${isHovered ? 11 : 10}px 'JetBrains Mono', monospace`;
-    ctx.fillStyle = node.enabled
-      ? isHovered
-        ? "#fff"
-        : "#ccc"
-      : "#555";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(
-      node.label.length > 18
-        ? node.label.slice(0, 16) + "…"
-        : node.label,
-      node.x,
-      node.y + r + 6
+  for (const proj of projectNodes) {
+    const prefix = proj.id + ":";
+    const children = data.nodes.filter((n) => n.id.startsWith(prefix));
+    const agentRuleEdges = data.edges.filter(
+      (e) =>
+        e.from.startsWith(prefix) &&
+        e.from.includes(":agent:") &&
+        e.to.includes(":rule:") &&
+        e.label === "follows"
     );
+
+    projects.push({
+      project: proj,
+      agents: children.filter((n) => n.kind === "agent"),
+      rules: children.filter((n) => n.kind === "rule"),
+      skills: children.filter((n) => n.kind === "skill"),
+      commands: children.filter((n) => n.kind === "command"),
+      agentRuleEdges,
+    });
   }
 
-  ctx.restore();
+  // Sort projects by name
+  projects.sort((a, b) => a.project.label.localeCompare(b.project.label));
+
+  const globalHooks = data.nodes.filter((n) => n.id.startsWith("global:hook:"));
+  const globalPlugins = data.nodes.filter((n) => n.id.startsWith("global:plugin:"));
+  const globalCommands = data.nodes.filter(
+    (n) => n.id.startsWith("global:commands") || (n.kind === "command" && n.id.startsWith("global:"))
+  );
+  const globalSkills = data.nodes.filter((n) => n.id.startsWith("global:skill:"));
+
+  return { projects, globalHooks, globalPlugins, globalCommands, globalSkills };
+}
+
+function NodeChip({
+  node,
+  onHover,
+  onLeave,
+  hovered,
+}: {
+  node: ArchNode;
+  onHover: (n: ArchNode) => void;
+  onLeave: () => void;
+  hovered: boolean;
+}) {
+  const color = KIND_COLORS[node.kind] || "#666";
+  const icon = KIND_ICONS[node.kind] || "●";
+  return (
+    <div
+      className={`arch-chip ${hovered ? "hovered" : ""}`}
+      style={{
+        borderColor: hovered ? color : color + "44",
+        background: hovered ? color + "22" : color + "0a",
+      }}
+      onMouseEnter={() => onHover(node)}
+      onMouseLeave={onLeave}
+    >
+      <span className="arch-chip-icon">{icon}</span>
+      <span className="arch-chip-label">{node.label}</span>
+    </div>
+  );
+}
+
+function NodeColumn({
+  title,
+  icon,
+  nodes,
+  color,
+  onHover,
+  onLeave,
+  hoveredId,
+  highlightIds,
+}: {
+  title: string;
+  icon: string;
+  nodes: ArchNode[];
+  color: string;
+  onHover: (n: ArchNode) => void;
+  onLeave: () => void;
+  hoveredId: string | null;
+  highlightIds?: Set<string>;
+}) {
+  if (nodes.length === 0) return null;
+  return (
+    <div className="arch-column">
+      <div className="arch-column-header" style={{ color }}>
+        {icon} {title}
+        <span className="arch-column-count">{nodes.length}</span>
+      </div>
+      <div className="arch-column-items">
+        {nodes.map((n) => (
+          <NodeChip
+            key={n.id}
+            node={n}
+            onHover={onHover}
+            onLeave={onLeave}
+            hovered={n.id === hoveredId || (highlightIds?.has(n.id) ?? false)}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ArchitectureView({ onModeChange }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [archData, setArchData] = useState<ArchitectureData | null>(null);
-  const [layoutNodes, setLayoutNodes] = useState<LayoutNode[]>([]);
-  const [hoveredNode, setHoveredNode] = useState<LayoutNode | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [visibleKinds, setVisibleKinds] = useState<Set<string>>(
-    new Set(ALL_KINDS)
-  );
-  const dragRef = useRef<{
-    node: LayoutNode;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<ArchNode | null>(null);
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
-  // Load data
   useEffect(() => {
     invoke<ArchitectureData>("get_architecture")
       .then(setArchData)
       .catch((err) => {
         console.error("get_architecture failed:", err);
-        // Show empty state instead of stuck loading
         setArchData({ nodes: [], edges: [] });
       });
   }, []);
 
-  // Layout
-  useEffect(() => {
-    if (!archData || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const rect = canvas.parentElement!.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
-
-    const nodes: LayoutNode[] = archData.nodes.map((n) => ({
-      ...n,
-      x: 0,
-      y: 0,
-      vx: 0,
-      vy: 0,
-      radius: n.kind === "project" ? 26 : n.kind === "agent" ? 20 : 16,
-    }));
-
-    forceLayout(nodes, archData.edges, w, h);
-    setLayoutNodes(nodes);
-  }, [archData]);
-
-  // Draw
-  useEffect(() => {
-    if (!canvasRef.current || layoutNodes.length === 0 || !archData) return;
-    const canvas = canvasRef.current;
-    const rect = canvas.parentElement!.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = rect.width + "px";
-    canvas.style.height = rect.height + "px";
-
-    const ctx = canvas.getContext("2d")!;
-    drawGraph(
-      ctx,
-      layoutNodes,
-      archData.edges,
-      rect.width,
-      rect.height,
-      hoveredNode?.id || null,
-      visibleKinds,
-      dpr
-    );
-  }, [layoutNodes, hoveredNode, archData, visibleKinds]);
-
-  const findNodeAt = useCallback(
-    (x: number, y: number): LayoutNode | null => {
-      for (let i = layoutNodes.length - 1; i >= 0; i--) {
-        const n = layoutNodes[i];
-        if (!visibleKinds.has(n.kind)) continue;
-        const dx = n.x - x;
-        const dy = n.y - y;
-        if (dx * dx + dy * dy <= (n.radius + 6) * (n.radius + 6)) return n;
+  const handleHover = useCallback(
+    (node: ArchNode) => {
+      setHoveredNode(node);
+      if (!archData) return;
+      // Highlight connected nodes
+      const connected = new Set<string>();
+      for (const edge of archData.edges) {
+        if (edge.from === node.id) connected.add(edge.to);
+        if (edge.to === node.id) connected.add(edge.from);
       }
-      return null;
+      setHighlightIds(connected);
     },
-    [layoutNodes, visibleKinds]
+    [archData]
   );
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      setMousePos({ x: e.clientX, y: e.clientY });
-
-      if (dragRef.current) {
-        dragRef.current.node.x = x + dragRef.current.offsetX;
-        dragRef.current.node.y = y + dragRef.current.offsetY;
-        setLayoutNodes([...layoutNodes]);
-        return;
-      }
-
-      setHoveredNode(findNodeAt(x, y));
-    },
-    [layoutNodes, findNodeAt]
-  );
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const node = findNodeAt(x, y);
-      if (node) {
-        dragRef.current = {
-          node,
-          offsetX: node.x - x,
-          offsetY: node.y - y,
-        };
-      }
-    },
-    [findNodeAt]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    dragRef.current = null;
+  const handleLeave = useCallback(() => {
+    setHoveredNode(null);
+    setHighlightIds(new Set());
   }, []);
 
-  const toggleKind = (kind: string) => {
-    const next = new Set(visibleKinds);
-    if (next.has(kind)) {
-      next.delete(kind);
-    } else {
-      next.add(kind);
-    }
-    setVisibleKinds(next);
+  const toggleCollapse = (projId: string) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projId)) next.delete(projId);
+      else next.add(projId);
+      return next;
+    });
   };
 
   const handleDrag = useCallback(async (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button, select")) return;
+    if ((e.target as HTMLElement).closest("button")) return;
     e.preventDefault();
     await invoke("start_drag");
   }, []);
@@ -406,15 +208,14 @@ export default function ArchitectureView({ onModeChange }: Props) {
         <div className="arch-titlebar">
           <div className="arch-titlebar-left">
             <span className="arch-title">🔗 Architecture</span>
-            <span className="arch-subtitle">Loading...</span>
           </div>
           <div className="arch-titlebar-right">
-            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
+            <button className="arch-btn" onClick={() => onModeChange("full")}>
+              ← Dashboard
+            </button>
           </div>
         </div>
-        <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 14 }}>
-          Loading architecture data...
-        </div>
+        <div className="arch-loading">Loading...</div>
       </div>
     );
   }
@@ -425,54 +226,45 @@ export default function ArchitectureView({ onModeChange }: Props) {
         <div className="arch-titlebar">
           <div className="arch-titlebar-left">
             <span className="arch-title">🔗 Architecture</span>
-            <span className="arch-subtitle">No data</span>
           </div>
           <div className="arch-titlebar-right">
-            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
+            <button className="arch-btn" onClick={() => onModeChange("full")}>
+              ← Dashboard
+            </button>
           </div>
         </div>
-        <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 14 }}>
-          Claude Code config not found at ~/.claude/settings.json
+        <div className="arch-loading">
+          No projects with .claude/ found
         </div>
       </div>
     );
   }
 
-  const visibleNodeCount = archData.nodes.filter((n) =>
-    visibleKinds.has(n.kind)
-  ).length;
-  const enabledCount = archData.nodes.filter((n) => n.enabled).length;
+  const { projects, globalHooks, globalPlugins, globalCommands, globalSkills } =
+    groupByProject(archData);
 
   return (
     <div className="arch-view">
+      {/* Titlebar */}
       <div className="arch-titlebar" onMouseDown={handleDrag}>
         <div className="arch-titlebar-left">
           <span className="arch-title">🔗 Architecture</span>
           <span className="arch-subtitle">
-            {visibleNodeCount} nodes · {archData.edges.length} edges
+            {projects.length} projects · {archData.nodes.length} nodes
           </span>
         </div>
         <div className="arch-titlebar-right">
           <button
             className="arch-btn"
             onClick={() => {
-              // Re-layout
-              if (!canvasRef.current) return;
-              const rect =
-                canvasRef.current.parentElement!.getBoundingClientRect();
-              const nodes: LayoutNode[] = archData.nodes.map((n) => ({
-                ...n,
-                x: 0,
-                y: 0,
-                vx: 0,
-                vy: 0,
-                radius: n.kind === "project" ? 26 : n.kind === "agent" ? 20 : 16,
-              }));
-              forceLayout(nodes, archData.edges, rect.width, rect.height);
-              setLayoutNodes(nodes);
+              if (collapsedProjects.size > 0) {
+                setCollapsedProjects(new Set());
+              } else {
+                setCollapsedProjects(new Set(projects.map((p) => p.project.id)));
+              }
             }}
           >
-            🔄 Re-layout
+            {collapsedProjects.size > 0 ? "📂 Expand All" : "📁 Collapse All"}
           </button>
           <button className="arch-btn" onClick={() => onModeChange("full")}>
             ← Dashboard
@@ -480,85 +272,183 @@ export default function ArchitectureView({ onModeChange }: Props) {
         </div>
       </div>
 
-      <div className="arch-filters">
-        {ALL_KINDS.map((kind) => (
-          <button
-            key={kind}
-            className={`arch-filter-btn ${
-              visibleKinds.has(kind) ? "active" : ""
-            }`}
-            onClick={() => toggleKind(kind)}
-            style={
-              visibleKinds.has(kind)
-                ? {
-                    borderColor: KIND_COLORS[kind] + "66",
-                    color: KIND_COLORS[kind],
-                  }
-                : {}
-            }
-          >
-            {KIND_ICONS[kind]} {kind}
-          </button>
-        ))}
-      </div>
-
-      <div className="arch-canvas-wrap">
-        <canvas
-          ref={canvasRef}
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={() => {
-            setHoveredNode(null);
-            dragRef.current = null;
-          }}
-          style={{ cursor: hoveredNode ? "grab" : "default" }}
-        />
-
-        <div className="arch-stats">
-          {enabledCount}/{archData.nodes.length} enabled
-        </div>
-
-        <div className="arch-legend">
-          {ALL_KINDS.map((kind) => (
-            <div key={kind} className="arch-legend-item">
-              <div
-                className="arch-legend-dot"
-                style={{ background: KIND_COLORS[kind] }}
+      {/* Content */}
+      <div className="arch-content">
+        {/* Global section */}
+        {(globalHooks.length > 0 || globalPlugins.length > 0 || globalCommands.length > 0 || globalSkills.length > 0) && (
+          <div className="arch-global-section">
+            <div className="arch-section-title">🌐 Global (all projects)</div>
+            <div className="arch-row">
+              <NodeColumn
+                title="Hooks"
+                icon="🪝"
+                nodes={globalHooks}
+                color={KIND_COLORS.hook}
+                onHover={handleHover}
+                onLeave={handleLeave}
+                hoveredId={hoveredNode?.id ?? null}
+                highlightIds={highlightIds}
               />
-              <span>{kind}</span>
+              <NodeColumn
+                title="Plugins"
+                icon="🔌"
+                nodes={globalPlugins}
+                color={KIND_COLORS.plugin}
+                onHover={handleHover}
+                onLeave={handleLeave}
+                hoveredId={hoveredNode?.id ?? null}
+                highlightIds={highlightIds}
+              />
+              <NodeColumn
+                title="Skills"
+                icon="⚡"
+                nodes={globalSkills}
+                color={KIND_COLORS.skill}
+                onHover={handleHover}
+                onLeave={handleLeave}
+                hoveredId={hoveredNode?.id ?? null}
+                highlightIds={highlightIds}
+              />
             </div>
-          ))}
-        </div>
-
-        {hoveredNode && (
-          <div
-            className="arch-tooltip"
-            style={{
-              left: mousePos.x + 16,
-              top: mousePos.y - 10,
-              position: "fixed",
-            }}
-          >
-            <div className="arch-tooltip-title">
-              {KIND_ICONS[hoveredNode.kind]} {hoveredNode.label}
-            </div>
-            <div className="arch-tooltip-kind">
-              {hoveredNode.kind} ·{" "}
-              {hoveredNode.enabled ? "✅ enabled" : "⭕ disabled"}
-            </div>
-            {Object.keys(hoveredNode.details).length > 0 && (
-              <div className="arch-tooltip-detail">
-                {Object.entries(hoveredNode.details).map(([k, v]) => (
-                  <span key={k}>
-                    {k}: {v}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
         )}
+
+        {/* Projects */}
+        {projects.map((pg) => {
+          const collapsed = collapsedProjects.has(pg.project.id);
+          const total =
+            pg.agents.length +
+            pg.rules.length +
+            pg.skills.length +
+            pg.commands.length;
+
+          return (
+            <div key={pg.project.id} className="arch-project-section">
+              <div
+                className="arch-project-header"
+                onClick={() => toggleCollapse(pg.project.id)}
+              >
+                <span className="arch-project-toggle">
+                  {collapsed ? "▶" : "▼"}
+                </span>
+                <span className="arch-project-icon">📁</span>
+                <span className="arch-project-name">{pg.project.label}</span>
+                <span className="arch-project-meta">
+                  {pg.agents.length > 0 && (
+                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.agent }}>
+                      🤖{pg.agents.length}
+                    </span>
+                  )}
+                  {pg.rules.length > 0 && (
+                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.rule }}>
+                      📜{pg.rules.length}
+                    </span>
+                  )}
+                  {pg.skills.length > 0 && (
+                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.skill }}>
+                      ⚡{pg.skills.length}
+                    </span>
+                  )}
+                  {pg.commands.length > 0 && (
+                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.command }}>
+                      ⌨️{pg.commands.length}
+                    </span>
+                  )}
+                  {total === 0 && (
+                    <span className="arch-meta-badge" style={{ color: "#555" }}>
+                      empty
+                    </span>
+                  )}
+                </span>
+                {pg.project.details.path && (
+                  <span className="arch-project-path">
+                    {pg.project.details.path}
+                  </span>
+                )}
+              </div>
+
+              {!collapsed && total > 0 && (
+                <div className="arch-row">
+                  <NodeColumn
+                    title="Agents"
+                    icon="🤖"
+                    nodes={pg.agents}
+                    color={KIND_COLORS.agent}
+                    onHover={handleHover}
+                    onLeave={handleLeave}
+                    hoveredId={hoveredNode?.id ?? null}
+                    highlightIds={highlightIds}
+                  />
+
+                  {/* Arrow */}
+                  {pg.agents.length > 0 && pg.rules.length > 0 && (
+                    <div className="arch-arrow">
+                      <span>→</span>
+                      {pg.agentRuleEdges.length > 0 && (
+                        <span className="arch-arrow-label">follows</span>
+                      )}
+                    </div>
+                  )}
+
+                  <NodeColumn
+                    title="Rules"
+                    icon="📜"
+                    nodes={pg.rules}
+                    color={KIND_COLORS.rule}
+                    onHover={handleHover}
+                    onLeave={handleLeave}
+                    hoveredId={hoveredNode?.id ?? null}
+                    highlightIds={highlightIds}
+                  />
+
+                  <NodeColumn
+                    title="Skills"
+                    icon="⚡"
+                    nodes={pg.skills}
+                    color={KIND_COLORS.skill}
+                    onHover={handleHover}
+                    onLeave={handleLeave}
+                    hoveredId={hoveredNode?.id ?? null}
+                    highlightIds={highlightIds}
+                  />
+
+                  <NodeColumn
+                    title="Commands"
+                    icon="⌨️"
+                    nodes={pg.commands}
+                    color={KIND_COLORS.command}
+                    onHover={handleHover}
+                    onLeave={handleLeave}
+                    hoveredId={hoveredNode?.id ?? null}
+                    highlightIds={highlightIds}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* Tooltip */}
+      {hoveredNode && (
+        <div className="arch-tooltip-fixed">
+          <div className="arch-tooltip-title">
+            {KIND_ICONS[hoveredNode.kind]} {hoveredNode.label}
+          </div>
+          <div className="arch-tooltip-kind">
+            {hoveredNode.kind}
+          </div>
+          {Object.keys(hoveredNode.details).length > 0 && (
+            <div className="arch-tooltip-detail">
+              {Object.entries(hoveredNode.details).map(([k, v]) => (
+                <div key={k}>
+                  <span className="arch-detail-key">{k}:</span> {v}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

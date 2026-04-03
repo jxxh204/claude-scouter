@@ -9,6 +9,7 @@
   color: #e0e0e0;
 }
 
+/* Titlebar */
 .arch-titlebar {
   display: flex;
   align-items: center;
@@ -20,30 +21,25 @@
   flex-shrink: 0;
   z-index: 10;
 }
-
 .arch-titlebar-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-
 .arch-title {
   font-size: 13px;
   font-weight: 600;
   color: #c4b5fd;
 }
-
 .arch-subtitle {
   font-size: 11px;
   color: #666;
 }
-
 .arch-titlebar-right {
   display: flex;
   gap: 6px;
   -webkit-app-region: no-drag;
 }
-
 .arch-btn {
   background: rgba(139, 92, 246, 0.15);
   border: 1px solid rgba(139, 92, 246, 0.3);
@@ -54,71 +50,198 @@
   cursor: pointer;
   transition: all 0.15s;
 }
-
 .arch-btn:hover {
   background: rgba(139, 92, 246, 0.3);
   border-color: rgba(139, 92, 246, 0.5);
 }
 
-.arch-canvas-wrap {
+/* Loading */
+.arch-loading {
+  padding: 40px;
+  text-align: center;
+  color: #aaa;
+  font-size: 14px;
+}
+
+/* Content - scrollable */
+.arch-content {
   flex: 1;
-  position: relative;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Global section */
+.arch-global-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.arch-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+/* Project section */
+.arch-project-section {
+  background: rgba(139, 92, 246, 0.03);
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  border-radius: 8px;
   overflow: hidden;
 }
-
-.arch-canvas-wrap canvas {
-  display: block;
-}
-
-/* Legend */
-.arch-legend {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  display: flex;
-  gap: 12px;
-  padding: 8px 12px;
-  background: rgba(10, 10, 15, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  font-size: 11px;
-  z-index: 5;
-}
-
-.arch-legend-item {
+.arch-project-header {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid transparent;
+}
+.arch-project-header:hover {
+  background: rgba(139, 92, 246, 0.06);
+}
+.arch-project-toggle {
+  font-size: 10px;
+  color: #666;
+  width: 12px;
+}
+.arch-project-icon {
+  font-size: 16px;
+}
+.arch-project-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c4b5fd;
+}
+.arch-project-meta {
+  display: flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+.arch-meta-badge {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.arch-project-path {
+  margin-left: auto;
+  font-size: 10px;
+  color: #444;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.arch-legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+/* Row — horizontal flow */
+.arch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 14px;
+  overflow-x: auto;
+}
+
+/* Arrow between columns */
+.arch-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  min-height: 40px;
+  color: #444;
+  font-size: 18px;
   flex-shrink: 0;
+}
+.arch-arrow-label {
+  font-size: 9px;
+  color: #555;
+  margin-top: 2px;
+}
+
+/* Column */
+.arch-column {
+  min-width: 130px;
+  max-width: 200px;
+  flex-shrink: 0;
+}
+.arch-column-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.arch-column-count {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0 5px;
+  font-size: 9px;
+  color: #888;
+  margin-left: 4px;
+}
+.arch-column-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Node chip */
+.arch-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: default;
+  transition: all 0.15s;
+}
+.arch-chip.hovered {
+  transform: translateX(2px);
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.15);
+}
+.arch-chip-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.arch-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Tooltip */
-.arch-tooltip {
-  position: absolute;
-  pointer-events: none;
+.arch-tooltip-fixed {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
   background: rgba(20, 20, 35, 0.95);
   border: 1px solid rgba(139, 92, 246, 0.4);
-  border-radius: 6px;
-  padding: 10px 14px;
+  border-radius: 8px;
+  padding: 12px 16px;
   font-size: 11px;
-  max-width: 260px;
+  max-width: 300px;
   z-index: 20;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
-
 .arch-tooltip-title {
   font-weight: 600;
   font-size: 13px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   color: #fff;
 }
-
 .arch-tooltip-kind {
   color: #8b5cf6;
   font-size: 10px;
@@ -126,53 +249,25 @@
   letter-spacing: 0.5px;
   margin-bottom: 6px;
 }
-
 .arch-tooltip-detail {
   color: #999;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+.arch-detail-key {
+  color: #666;
 }
 
-.arch-tooltip-detail span {
-  display: block;
+/* Scrollbar */
+.arch-content::-webkit-scrollbar {
+  width: 6px;
 }
-
-/* Filter bar */
-.arch-filters {
-  display: flex;
-  gap: 6px;
-  padding: 6px 14px;
-  background: rgba(15, 15, 25, 0.95);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  flex-shrink: 0;
+.arch-content::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-.arch-filter-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #888;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.arch-filter-btn.active {
+.arch-content::-webkit-scrollbar-thumb {
   background: rgba(139, 92, 246, 0.2);
-  border-color: rgba(139, 92, 246, 0.4);
-  color: #c4b5fd;
+  border-radius: 3px;
 }
-
-.arch-filter-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
-}
-
-/* Stats bar */
-.arch-stats {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  font-size: 10px;
-  color: #555;
-  z-index: 5;
+.arch-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.4);
 }
