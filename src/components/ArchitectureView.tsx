@@ -274,7 +274,13 @@ export default function ArchitectureView({ onModeChange }: Props) {
 
   // Load data
   useEffect(() => {
-    invoke<ArchitectureData>("get_architecture").then(setArchData);
+    invoke<ArchitectureData>("get_architecture")
+      .then(setArchData)
+      .catch((err) => {
+        console.error("get_architecture failed:", err);
+        // Show empty state instead of stuck loading
+        setArchData({ nodes: [], edges: [] });
+      });
   }, []);
 
   // Layout
@@ -395,8 +401,36 @@ export default function ArchitectureView({ onModeChange }: Props) {
   if (!archData) {
     return (
       <div className="arch-view">
-        <div style={{ padding: 40, textAlign: "center", color: "#666" }}>
-          Loading architecture...
+        <div className="arch-titlebar">
+          <div className="arch-titlebar-left">
+            <span className="arch-title">🔗 Architecture</span>
+            <span className="arch-subtitle">Loading...</span>
+          </div>
+          <div className="arch-titlebar-right">
+            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
+          </div>
+        </div>
+        <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 14 }}>
+          Loading architecture data...
+        </div>
+      </div>
+    );
+  }
+
+  if (archData.nodes.length === 0) {
+    return (
+      <div className="arch-view">
+        <div className="arch-titlebar">
+          <div className="arch-titlebar-left">
+            <span className="arch-title">🔗 Architecture</span>
+            <span className="arch-subtitle">No data</span>
+          </div>
+          <div className="arch-titlebar-right">
+            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
+          </div>
+        </div>
+        <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 14 }}>
+          OpenClaw config not found at ~/.openclaw/openclaw.json
         </div>
       </div>
     );
