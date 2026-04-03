@@ -313,8 +313,8 @@ export default function ArchitectureView({ onModeChange }: Props) {
           </div>
         )}
 
-        {/* Projects */}
-        {projects.map((pg) => {
+        {/* Projects with content */}
+        {projects.filter(pg => (pg.agents.length + pg.rules.length + pg.skills.length + pg.commands.length) > 0).map((pg) => {
           const collapsed = collapsedProjects.has(pg.project.id);
           const total =
             pg.agents.length +
@@ -336,27 +336,22 @@ export default function ArchitectureView({ onModeChange }: Props) {
                 <span className="arch-project-meta">
                   {pg.agents.length > 0 && (
                     <span className="arch-meta-badge" style={{ color: KIND_COLORS.agent }}>
-                      🤖{pg.agents.length}
+                      🤖 {pg.agents.length}
                     </span>
                   )}
                   {pg.rules.length > 0 && (
                     <span className="arch-meta-badge" style={{ color: KIND_COLORS.rule }}>
-                      📜{pg.rules.length}
+                      📜 {pg.rules.length}
                     </span>
                   )}
                   {pg.skills.length > 0 && (
                     <span className="arch-meta-badge" style={{ color: KIND_COLORS.skill }}>
-                      ⚡{pg.skills.length}
+                      ⚡ {pg.skills.length}
                     </span>
                   )}
                   {pg.commands.length > 0 && (
                     <span className="arch-meta-badge" style={{ color: KIND_COLORS.command }}>
-                      ⌨️{pg.commands.length}
-                    </span>
-                  )}
-                  {total === 0 && (
-                    <span className="arch-meta-badge" style={{ color: "#555" }}>
-                      empty
+                      ⌨️ {pg.commands.length}
                     </span>
                   )}
                 </span>
@@ -367,7 +362,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
                 )}
               </div>
 
-              {!collapsed && total > 0 && (
+              {!collapsed && (
                 <div className="arch-row">
                   <NodeColumn
                     title="Agents"
@@ -427,6 +422,17 @@ export default function ArchitectureView({ onModeChange }: Props) {
             </div>
           );
         })}
+
+        {/* Empty projects summary */}
+        {(() => {
+          const emptyCount = projects.filter(pg => (pg.agents.length + pg.rules.length + pg.skills.length + pg.commands.length) === 0).length;
+          if (emptyCount === 0) return null;
+          return (
+            <div className="arch-empty-summary">
+              📁 {emptyCount} projects with no .claude/ components
+            </div>
+          );
+        })()}
       </div>
 
       {/* Tooltip */}
