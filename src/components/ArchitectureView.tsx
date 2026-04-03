@@ -17,23 +17,25 @@ interface LayoutNode extends ArchNode {
 
 const KIND_COLORS: Record<string, string> = {
   agent: "#8b5cf6",
-  skill: "#22c55e",
-  channel: "#3b82f6",
-  command: "#f59e0b",
-  plugin: "#ef4444",
-  model: "#ec4899",
+  plugin: "#3b82f6",
+  hook: "#f59e0b",
+  command: "#22c55e",
+  skill: "#ec4899",
+  project: "#06b6d4",
+  permission: "#ef4444",
 };
 
 const KIND_ICONS: Record<string, string> = {
   agent: "🤖",
-  skill: "⚡",
-  channel: "📡",
-  command: "⌨️",
   plugin: "🔌",
-  model: "🧠",
+  hook: "🪝",
+  command: "⌨️",
+  skill: "⚡",
+  project: "📁",
+  permission: "🔐",
 };
 
-const ALL_KINDS = ["agent", "model", "skill", "channel", "command", "plugin"];
+const ALL_KINDS = ["agent", "plugin", "hook", "command", "skill", "project", "permission"];
 
 function forceLayout(
   nodes: LayoutNode[],
@@ -297,7 +299,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
       y: 0,
       vx: 0,
       vy: 0,
-      radius: n.kind === "agent" ? 24 : n.kind === "model" ? 20 : 16,
+      radius: n.kind === "agent" ? 28 : n.kind === "project" ? 18 : 16,
     }));
 
     forceLayout(nodes, archData.edges, w, h);
@@ -430,7 +432,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
           </div>
         </div>
         <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 14 }}>
-          OpenClaw config not found at ~/.openclaw/openclaw.json
+          Claude Code config not found at ~/.claude/settings.json
         </div>
       </div>
     );
@@ -464,7 +466,7 @@ export default function ArchitectureView({ onModeChange }: Props) {
                 y: 0,
                 vx: 0,
                 vy: 0,
-                radius: n.kind === "agent" ? 24 : n.kind === "model" ? 20 : 16,
+                radius: n.kind === "agent" ? 28 : n.kind === "project" ? 18 : 16,
               }));
               forceLayout(nodes, archData.edges, rect.width, rect.height);
               setLayoutNodes(nodes);
