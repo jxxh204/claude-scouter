@@ -9,8 +9,8 @@ interface Props {
 
 const PLANS = [
   { id: "pro", name: "Pro", limit: "44K tokens/5h", price: "$20/mo", icon: "⚡" },
-  { id: "max5", name: "Max 5", limit: "88K tokens/5h", price: "$100/mo", icon: "🔥" },
-  { id: "max20", name: "Max 20", limit: "220K tokens/5h", price: "$200/mo", icon: "💎" },
+  { id: "max5", name: "Max 5", limit: "220K tokens/5h", price: "$100/mo", icon: "🔥" },
+  { id: "max20", name: "Max 20", limit: "880K tokens/5h", price: "$200/mo", icon: "💎" },
 ];
 
 export default function Onboarding({ onComplete }: Props) {

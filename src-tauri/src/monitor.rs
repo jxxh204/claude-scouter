@@ -15,8 +15,8 @@ static WARNED_70: AtomicBool = AtomicBool::new(false);
 static WARNED_90: AtomicBool = AtomicBool::new(false);
 
 const PLAN_PRO: u64 = 44_000;
-const PLAN_MAX5: u64 = 88_000;
-const PLAN_MAX20: u64 = 220_000;
+const PLAN_MAX5: u64 = 220_000;
+const PLAN_MAX20: u64 = 880_000;
 const WINDOW_HOURS: i64 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
