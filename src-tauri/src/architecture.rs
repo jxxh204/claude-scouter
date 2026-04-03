@@ -48,7 +48,7 @@ fn read_md_summary(path: &PathBuf) -> HashMap<String, String> {
         // First non-empty line as description
         for line in content.lines() {
             let trimmed = line.trim().trim_start_matches('#').trim();
-            if !trimmed.is_empty() {
+            if !trimmed.is_empty() && trimmed != "---" {
                 let desc = if trimmed.len() > 80 {
                     format!("{}…", &trimmed[..77])
                 } else {
@@ -61,6 +61,61 @@ fn read_md_summary(path: &PathBuf) -> HashMap<String, String> {
         let line_count = content.lines().count();
         d.insert("lines".into(), line_count.to_string());
     }
+    d
+}
+
+/// Parse YAML frontmatter from agent .md files
+fn parse_agent_frontmatter(path: &PathBuf) -> HashMap<String, String> {
+    let mut d = HashMap::new();
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return d,
+    };
+
+    let trimmed = content.trim();
+    if !trimmed.starts_with("---") {
+        // No frontmatter, just read as summary
+        return read_md_summary(path);
+    }
+
+    // Find closing ---
+    let rest = &trimmed[3..];
+    let end = match rest.find("---") {
+        Some(pos) => pos,
+        None => return read_md_summary(path),
+    };
+
+    let frontmatter = &rest[..end];
+    let body = rest[end + 3..].trim();
+
+    // Parse simple YAML key: value pairs
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if let Some(pos) = line.find(':') {
+            let key = line[..pos].trim().to_string();
+            let val = line[pos + 1..].trim().to_string();
+            if !key.is_empty() && !val.is_empty() {
+                d.insert(key, val);
+            }
+        }
+    }
+
+    // Extract body description (first non-empty line after frontmatter)
+    if !body.is_empty() {
+        let first_line = body.lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim();
+        if !first_line.is_empty() {
+            let desc = if first_line.len() > 100 {
+                format!("{}…", &first_line[..97])
+            } else {
+                first_line.to_string()
+            };
+            d.entry("role".into()).or_insert(desc);
+        }
+    }
+
     d
 }
 
@@ -130,7 +185,7 @@ fn scan_project(
                 }
                 let agent_name = fname.trim_end_matches(".md");
                 let agent_id = format!("{}:agent:{}", proj_id, agent_name);
-                let details = read_md_summary(&entry.path());
+                let details = parse_agent_frontmatter(&entry.path());
 
                 nodes.push(make_node(&agent_id, agent_name, "agent", details));
                 edges.push(ArchEdge {

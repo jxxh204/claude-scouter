@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ViewMode, ArchitectureData, ArchNode, ArchEdge } from "../types";
 import "./ArchitectureView.css";
@@ -17,23 +17,12 @@ const KIND_COLORS: Record<string, string> = {
   plugin: "#06b6d4",
 };
 
-const KIND_ICONS: Record<string, string> = {
-  project: "📁",
-  agent: "🤖",
-  rule: "📜",
-  skill: "⚡",
-  command: "⌨️",
-  hook: "🪝",
-  plugin: "🔌",
-};
-
 interface ProjectGroup {
   project: ArchNode;
   agents: ArchNode[];
   rules: ArchNode[];
   skills: ArchNode[];
   commands: ArchNode[];
-  // agent→rule connections
   agentRuleEdges: ArchEdge[];
 }
 
@@ -41,10 +30,8 @@ function groupByProject(data: ArchitectureData): {
   projects: ProjectGroup[];
   globalHooks: ArchNode[];
   globalPlugins: ArchNode[];
-  globalCommands: ArchNode[];
   globalSkills: ArchNode[];
 } {
-  const nodeMap = new Map(data.nodes.map((n) => [n.id, n]));
   const projectNodes = data.nodes.filter((n) => n.kind === "project");
   const projects: ProjectGroup[] = [];
 
@@ -52,12 +39,10 @@ function groupByProject(data: ArchitectureData): {
     const prefix = proj.id + ":";
     const children = data.nodes.filter((n) => n.id.startsWith(prefix));
     const agentRuleEdges = data.edges.filter(
-      (e) =>
-        e.from.startsWith(prefix) &&
-        e.from.includes(":agent:") &&
-        e.to.includes(":rule:") &&
-        e.label === "follows"
+      (e) => e.from.includes(":agent:") && e.to.includes(":rule:") && e.label === "follows"
     );
+    const total = children.length;
+    if (total === 0) continue;
 
     projects.push({
       project: proj,
@@ -69,94 +54,207 @@ function groupByProject(data: ArchitectureData): {
     });
   }
 
-  // Sort projects by name
   projects.sort((a, b) => a.project.label.localeCompare(b.project.label));
 
-  const globalHooks = data.nodes.filter((n) => n.id.startsWith("global:hook:"));
-  const globalPlugins = data.nodes.filter((n) => n.id.startsWith("global:plugin:"));
-  const globalCommands = data.nodes.filter(
-    (n) => n.id.startsWith("global:commands") || (n.kind === "command" && n.id.startsWith("global:"))
-  );
-  const globalSkills = data.nodes.filter((n) => n.id.startsWith("global:skill:"));
-
-  return { projects, globalHooks, globalPlugins, globalCommands, globalSkills };
+  return {
+    projects,
+    globalHooks: data.nodes.filter((n) => n.id.startsWith("global:hook:")),
+    globalPlugins: data.nodes.filter((n) => n.id.startsWith("global:plugin:")),
+    globalSkills: data.nodes.filter((n) => n.id.startsWith("global:skill:")),
+  };
 }
 
-function NodeChip({
-  node,
-  onHover,
-  onLeave,
-  hovered,
-}: {
-  node: ArchNode;
-  onHover: (n: ArchNode) => void;
-  onLeave: () => void;
-  hovered: boolean;
-}) {
-  const color = KIND_COLORS[node.kind] || "#666";
-  const icon = KIND_ICONS[node.kind] || "●";
+// Get connected rule names for an agent
+function getAgentRules(agent: ArchNode, rules: ArchNode[], edges: ArchEdge[]): ArchNode[] {
+  const ruleIds = edges
+    .filter((e) => e.from === agent.id && e.label === "follows")
+    .map((e) => e.to);
+  return rules.filter((r) => ruleIds.includes(r.id));
+}
+
+function FlowArrow({ label }: { label?: string }) {
   return (
-    <div
-      className={`arch-chip ${hovered ? "hovered" : ""}`}
-      style={{
-        borderColor: hovered ? color : color + "44",
-        background: hovered ? color + "22" : color + "0a",
-      }}
-      onMouseEnter={() => onHover(node)}
-      onMouseLeave={onLeave}
-    >
-      <span className="arch-chip-icon">{icon}</span>
-      <span className="arch-chip-label">{node.label}</span>
+    <div className="flow-arrow">
+      <div className="flow-arrow-line" />
+      <div className="flow-arrow-head">▼</div>
+      {label && <span className="flow-arrow-label">{label}</span>}
     </div>
   );
 }
 
-function NodeColumn({
-  title,
-  icon,
-  nodes,
-  color,
-  onHover,
-  onLeave,
-  hoveredId,
-  highlightIds,
-}: {
-  title: string;
-  icon: string;
-  nodes: ArchNode[];
-  color: string;
-  onHover: (n: ArchNode) => void;
-  onLeave: () => void;
-  hoveredId: string | null;
-  highlightIds?: Set<string>;
-}) {
-  if (nodes.length === 0) return null;
+function HookRow({ hooks, phase }: { hooks: ArchNode[]; phase: string }) {
+  const phaseHooks: Record<string, string[]> = {
+    start: ["SessionStart"],
+    pre: ["PreToolUse"],
+    post: ["PostToolUse"],
+    end: ["Stop", "SubagentStop", "Notification", "TeammateIdle"],
+    all: hooks.map((h) => h.label),
+  };
+  const relevant = hooks.filter((h) => (phaseHooks[phase] || []).includes(h.label));
+  if (relevant.length === 0) return null;
+
   return (
-    <div className="arch-column">
-      <div className="arch-column-header" style={{ color }}>
-        {icon} {title}
-        <span className="arch-column-count">{nodes.length}</span>
+    <div className="flow-hook-row">
+      {relevant.map((h) => (
+        <span key={h.id} className="flow-hook-chip">
+          🪝 {h.label}
+          {h.details.handlers && <span className="flow-hook-count">×{h.details.handlers}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AgentCard({ agent, rules, edges }: { agent: ArchNode; rules: ArchNode[]; edges: ArchEdge[] }) {
+  const connectedRules = getAgentRules(agent, rules, edges);
+  const tools = agent.details.tools?.split(",").map((t) => t.trim()) || [];
+  const model = agent.details.model || "";
+  const desc = agent.details.description || agent.details.role || "";
+
+  return (
+    <div className="flow-agent-card">
+      <div className="flow-agent-header">
+        <span className="flow-agent-icon">🤖</span>
+        <span className="flow-agent-name">{agent.label}</span>
+        {model && <span className="flow-agent-model">{model}</span>}
       </div>
-      <div className="arch-column-items">
-        {nodes.map((n) => (
-          <NodeChip
-            key={n.id}
-            node={n}
-            onHover={onHover}
-            onLeave={onLeave}
-            hovered={n.id === hoveredId || (highlightIds?.has(n.id) ?? false)}
-          />
-        ))}
+      {desc && <div className="flow-agent-desc">{desc}</div>}
+      {tools.length > 0 && (
+        <div className="flow-agent-tools">
+          {tools.map((t, i) => (
+            <span key={i} className="flow-tool-chip">🔧 {t}</span>
+          ))}
+        </div>
+      )}
+      {connectedRules.length > 0 && (
+        <div className="flow-agent-rules">
+          <span className="flow-rules-label">📜 follows:</span>
+          {connectedRules.map((r) => (
+            <span key={r.id} className="flow-rule-chip">{r.label}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectFlow({
+  pg,
+  globalHooks,
+  allEdges,
+}: {
+  pg: ProjectGroup;
+  globalHooks: ArchNode[];
+  allEdges: ArchEdge[];
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const hasAgentTeam = pg.agents.length > 1;
+
+  return (
+    <div className="flow-project">
+      <div className="flow-project-header" onClick={() => setCollapsed(!collapsed)}>
+        <span className="flow-toggle">{collapsed ? "▶" : "▼"}</span>
+        <span className="flow-project-icon">📁</span>
+        <span className="flow-project-name">{pg.project.label}</span>
+        <span className="flow-project-badges">
+          {pg.agents.length > 0 && <span style={{ color: KIND_COLORS.agent }}>🤖{pg.agents.length}</span>}
+          {pg.rules.length > 0 && <span style={{ color: KIND_COLORS.rule }}>📜{pg.rules.length}</span>}
+          {pg.skills.length > 0 && <span style={{ color: KIND_COLORS.skill }}>⚡{pg.skills.length}</span>}
+          {pg.commands.length > 0 && <span style={{ color: KIND_COLORS.command }}>⌨️{pg.commands.length}</span>}
+        </span>
       </div>
+
+      {!collapsed && (
+        <div className="flow-pipeline">
+          {/* Step 1: User Input */}
+          <div className="flow-step">
+            <div className="flow-step-box input">
+              👤 User Input
+              {pg.commands.length > 0 && (
+                <div className="flow-commands-inline">
+                  {pg.commands.map((c) => (
+                    <span key={c.id} className="flow-cmd-chip">/{c.label}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <FlowArrow />
+
+          {/* Step 2: SessionStart hook */}
+          <HookRow hooks={globalHooks} phase="start" />
+          {globalHooks.some((h) => h.label === "SessionStart") && <FlowArrow />}
+
+          {/* Step 3: Agent(s) */}
+          <div className="flow-step">
+            {hasAgentTeam ? (
+              <div className="flow-agent-team">
+                <div className="flow-team-label">🤖 Agent Team (tmux)</div>
+                <div className="flow-team-grid">
+                  {pg.agents.map((a) => (
+                    <AgentCard key={a.id} agent={a} rules={pg.rules} edges={allEdges} />
+                  ))}
+                </div>
+              </div>
+            ) : pg.agents.length === 1 ? (
+              <AgentCard agent={pg.agents[0]} rules={pg.rules} edges={allEdges} />
+            ) : (
+              <div className="flow-step-box agent">
+                🤖 Claude (default agent)
+                {pg.rules.length > 0 && (
+                  <div className="flow-agent-rules">
+                    <span className="flow-rules-label">📜 rules:</span>
+                    {pg.rules.map((r) => (
+                      <span key={r.id} className="flow-rule-chip">{r.label}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <FlowArrow />
+
+          {/* Step 4: Execution loop */}
+          <div className="flow-step">
+            <div className="flow-execution-loop">
+              <div className="flow-loop-label">🔄 Execution Loop</div>
+              <div className="flow-loop-steps">
+                <HookRow hooks={globalHooks} phase="pre" />
+                <div className="flow-loop-center">
+                  <span>🔧 Tool Execution</span>
+                  {pg.skills.length > 0 && (
+                    <div className="flow-skills-inline">
+                      {pg.skills.map((s) => (
+                        <span key={s.id} className="flow-skill-chip">⚡ {s.label}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <HookRow hooks={globalHooks} phase="post" />
+              </div>
+            </div>
+          </div>
+
+          <FlowArrow />
+
+          {/* Step 5: Output + end hooks */}
+          <div className="flow-step">
+            <div className="flow-step-box output">
+              ✅ Response
+            </div>
+          </div>
+
+          <HookRow hooks={globalHooks} phase="end" />
+        </div>
+      )}
     </div>
   );
 }
 
 export default function ArchitectureView({ onModeChange }: Props) {
   const [archData, setArchData] = useState<ArchitectureData | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<ArchNode | null>(null);
-  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     invoke<ArchitectureData>("get_architecture")
@@ -166,35 +264,6 @@ export default function ArchitectureView({ onModeChange }: Props) {
         setArchData({ nodes: [], edges: [] });
       });
   }, []);
-
-  const handleHover = useCallback(
-    (node: ArchNode) => {
-      setHoveredNode(node);
-      if (!archData) return;
-      // Highlight connected nodes
-      const connected = new Set<string>();
-      for (const edge of archData.edges) {
-        if (edge.from === node.id) connected.add(edge.to);
-        if (edge.to === node.id) connected.add(edge.from);
-      }
-      setHighlightIds(connected);
-    },
-    [archData]
-  );
-
-  const handleLeave = useCallback(() => {
-    setHoveredNode(null);
-    setHighlightIds(new Set());
-  }, []);
-
-  const toggleCollapse = (projId: string) => {
-    setCollapsedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(projId)) next.delete(projId);
-      else next.add(projId);
-      return next;
-    });
-  };
 
   const handleDrag = useCallback(async (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -206,13 +275,9 @@ export default function ArchitectureView({ onModeChange }: Props) {
     return (
       <div className="arch-view">
         <div className="arch-titlebar">
-          <div className="arch-titlebar-left">
-            <span className="arch-title">🔗 Architecture</span>
-          </div>
+          <div className="arch-titlebar-left"><span className="arch-title">🔗 Architecture</span></div>
           <div className="arch-titlebar-right">
-            <button className="arch-btn" onClick={() => onModeChange("full")}>
-              ← Dashboard
-            </button>
+            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
           </div>
         </div>
         <div className="arch-loading">Loading...</div>
@@ -224,237 +289,76 @@ export default function ArchitectureView({ onModeChange }: Props) {
     return (
       <div className="arch-view">
         <div className="arch-titlebar">
-          <div className="arch-titlebar-left">
-            <span className="arch-title">🔗 Architecture</span>
-          </div>
+          <div className="arch-titlebar-left"><span className="arch-title">🔗 Architecture</span></div>
           <div className="arch-titlebar-right">
-            <button className="arch-btn" onClick={() => onModeChange("full")}>
-              ← Dashboard
-            </button>
+            <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
           </div>
         </div>
-        <div className="arch-loading">
-          No projects with .claude/ found
-        </div>
+        <div className="arch-loading">No projects with .claude/ found</div>
       </div>
     );
   }
 
-  const { projects, globalHooks, globalPlugins, globalCommands, globalSkills } =
-    groupByProject(archData);
+  const { projects, globalHooks, globalPlugins, globalSkills } = groupByProject(archData);
 
   return (
     <div className="arch-view">
-      {/* Titlebar */}
       <div className="arch-titlebar" onMouseDown={handleDrag}>
         <div className="arch-titlebar-left">
           <span className="arch-title">🔗 Architecture</span>
-          <span className="arch-subtitle">
-            {projects.length} projects · {archData.nodes.length} nodes
-          </span>
+          <span className="arch-subtitle">{projects.length} projects</span>
         </div>
         <div className="arch-titlebar-right">
-          <button
-            className="arch-btn"
-            onClick={() => {
-              if (collapsedProjects.size > 0) {
-                setCollapsedProjects(new Set());
-              } else {
-                setCollapsedProjects(new Set(projects.map((p) => p.project.id)));
-              }
-            }}
-          >
-            {collapsedProjects.size > 0 ? "📂 Expand All" : "📁 Collapse All"}
-          </button>
-          <button className="arch-btn" onClick={() => onModeChange("full")}>
-            ← Dashboard
-          </button>
+          <button className="arch-btn" onClick={() => onModeChange("full")}>← Dashboard</button>
         </div>
       </div>
 
-      {/* Content */}
       <div className="arch-content">
-        {/* Global section */}
-        {(globalHooks.length > 0 || globalPlugins.length > 0 || globalCommands.length > 0 || globalSkills.length > 0) && (
-          <div className="arch-global-section">
-            <div className="arch-section-title">🌐 Global (all projects)</div>
-            <div className="arch-row">
-              <NodeColumn
-                title="Hooks"
-                icon="🪝"
-                nodes={globalHooks}
-                color={KIND_COLORS.hook}
-                onHover={handleHover}
-                onLeave={handleLeave}
-                hoveredId={hoveredNode?.id ?? null}
-                highlightIds={highlightIds}
-              />
-              <NodeColumn
-                title="Plugins"
-                icon="🔌"
-                nodes={globalPlugins}
-                color={KIND_COLORS.plugin}
-                onHover={handleHover}
-                onLeave={handleLeave}
-                hoveredId={hoveredNode?.id ?? null}
-                highlightIds={highlightIds}
-              />
-              <NodeColumn
-                title="Skills"
-                icon="⚡"
-                nodes={globalSkills}
-                color={KIND_COLORS.skill}
-                onHover={handleHover}
-                onLeave={handleLeave}
-                hoveredId={hoveredNode?.id ?? null}
-                highlightIds={highlightIds}
-              />
+        {/* Global overview */}
+        {(globalPlugins.length > 0 || globalSkills.length > 0) && (
+          <div className="flow-global">
+            <div className="flow-global-title">🌐 Global Components</div>
+            <div className="flow-global-row">
+              {globalPlugins.length > 0 && (
+                <div className="flow-global-group">
+                  <span className="flow-global-label">🔌 Plugins</span>
+                  {globalPlugins.map((p) => (
+                    <span key={p.id} className="flow-plugin-chip">{p.label}</span>
+                  ))}
+                </div>
+              )}
+              {globalSkills.length > 0 && (
+                <div className="flow-global-group">
+                  <span className="flow-global-label">⚡ Skills</span>
+                  {globalSkills.map((s) => (
+                    <span key={s.id} className="flow-skill-chip">{s.label}</span>
+                  ))}
+                </div>
+              )}
+              {globalHooks.length > 0 && (
+                <div className="flow-global-group">
+                  <span className="flow-global-label">🪝 Hooks ({globalHooks.length})</span>
+                  {globalHooks.map((h) => (
+                    <span key={h.id} className="flow-hook-chip">
+                      {h.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Projects with content */}
-        {projects.filter(pg => (pg.agents.length + pg.rules.length + pg.skills.length + pg.commands.length) > 0).map((pg) => {
-          const collapsed = collapsedProjects.has(pg.project.id);
-          const total =
-            pg.agents.length +
-            pg.rules.length +
-            pg.skills.length +
-            pg.commands.length;
-
-          return (
-            <div key={pg.project.id} className="arch-project-section">
-              <div
-                className="arch-project-header"
-                onClick={() => toggleCollapse(pg.project.id)}
-              >
-                <span className="arch-project-toggle">
-                  {collapsed ? "▶" : "▼"}
-                </span>
-                <span className="arch-project-icon">📁</span>
-                <span className="arch-project-name">{pg.project.label}</span>
-                <span className="arch-project-meta">
-                  {pg.agents.length > 0 && (
-                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.agent }}>
-                      🤖 {pg.agents.length}
-                    </span>
-                  )}
-                  {pg.rules.length > 0 && (
-                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.rule }}>
-                      📜 {pg.rules.length}
-                    </span>
-                  )}
-                  {pg.skills.length > 0 && (
-                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.skill }}>
-                      ⚡ {pg.skills.length}
-                    </span>
-                  )}
-                  {pg.commands.length > 0 && (
-                    <span className="arch-meta-badge" style={{ color: KIND_COLORS.command }}>
-                      ⌨️ {pg.commands.length}
-                    </span>
-                  )}
-                </span>
-                {pg.project.details.path && (
-                  <span className="arch-project-path">
-                    {pg.project.details.path}
-                  </span>
-                )}
-              </div>
-
-              {!collapsed && (
-                <div className="arch-row">
-                  <NodeColumn
-                    title="Agents"
-                    icon="🤖"
-                    nodes={pg.agents}
-                    color={KIND_COLORS.agent}
-                    onHover={handleHover}
-                    onLeave={handleLeave}
-                    hoveredId={hoveredNode?.id ?? null}
-                    highlightIds={highlightIds}
-                  />
-
-                  {/* Arrow */}
-                  {pg.agents.length > 0 && pg.rules.length > 0 && (
-                    <div className="arch-arrow">
-                      <span>→</span>
-                      {pg.agentRuleEdges.length > 0 && (
-                        <span className="arch-arrow-label">follows</span>
-                      )}
-                    </div>
-                  )}
-
-                  <NodeColumn
-                    title="Rules"
-                    icon="📜"
-                    nodes={pg.rules}
-                    color={KIND_COLORS.rule}
-                    onHover={handleHover}
-                    onLeave={handleLeave}
-                    hoveredId={hoveredNode?.id ?? null}
-                    highlightIds={highlightIds}
-                  />
-
-                  <NodeColumn
-                    title="Skills"
-                    icon="⚡"
-                    nodes={pg.skills}
-                    color={KIND_COLORS.skill}
-                    onHover={handleHover}
-                    onLeave={handleLeave}
-                    hoveredId={hoveredNode?.id ?? null}
-                    highlightIds={highlightIds}
-                  />
-
-                  <NodeColumn
-                    title="Commands"
-                    icon="⌨️"
-                    nodes={pg.commands}
-                    color={KIND_COLORS.command}
-                    onHover={handleHover}
-                    onLeave={handleLeave}
-                    hoveredId={hoveredNode?.id ?? null}
-                    highlightIds={highlightIds}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Empty projects summary */}
-        {(() => {
-          const emptyCount = projects.filter(pg => (pg.agents.length + pg.rules.length + pg.skills.length + pg.commands.length) === 0).length;
-          if (emptyCount === 0) return null;
-          return (
-            <div className="arch-empty-summary">
-              📁 {emptyCount} projects with no .claude/ components
-            </div>
-          );
-        })()}
+        {/* Project flows */}
+        {projects.map((pg) => (
+          <ProjectFlow
+            key={pg.project.id}
+            pg={pg}
+            globalHooks={globalHooks}
+            allEdges={archData.edges}
+          />
+        ))}
       </div>
-
-      {/* Tooltip */}
-      {hoveredNode && (
-        <div className="arch-tooltip-fixed">
-          <div className="arch-tooltip-title">
-            {KIND_ICONS[hoveredNode.kind]} {hoveredNode.label}
-          </div>
-          <div className="arch-tooltip-kind">
-            {hoveredNode.kind}
-          </div>
-          {Object.keys(hoveredNode.details).length > 0 && (
-            <div className="arch-tooltip-detail">
-              {Object.entries(hoveredNode.details).map(([k, v]) => (
-                <div key={k}>
-                  <span className="arch-detail-key">{k}:</span> {v}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
